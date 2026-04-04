@@ -38,14 +38,24 @@ extern uint32_t MESSAGE_KEY_ShowDate;
 // ================================================================
 // TYPES
 // ================================================================
+// Animation state machine:
+// IDLE → OPEN (door opens) → OVER (water overflows) → POOL (time appears)
+// → RECEDE (door closes, puddle shrinks) → SETTLE → IDLE
 typedef enum {
-    ST_IDLE, ST_OPEN, ST_OVER, ST_POOL, ST_RECEDE, ST_SETTLE
+    ST_IDLE,    // Resting: wash cycle spinning, eyes blinking
+    ST_OPEN,    // Door arc opening, machine shaking
+    ST_OVER,    // Water drops falling from door, puddle growing
+    ST_POOL,    // Water pooled at max, time visible
+    ST_RECEDE,  // Door closing, puddle shrinking, sock sliding back
+    ST_SETTLE   // Brief pause before returning to idle
 } AnimState;
 
+// Water drop particle (falls from door during overflow)
 typedef struct {
-    int16_t x, y, vx, vy;
-    uint8_t sz;
-    bool on;
+    int16_t x, y;    // position
+    int16_t vx, vy;  // velocity (vy increases with gravity)
+    uint8_t sz;      // radius
+    bool on;         // active flag
 } Drop;
 
 // Settings persisted to storage
@@ -113,20 +123,21 @@ static uint32_t s_seed = 42;
 // ================================================================
 // LAYOUT (all positions computed from screen bounds)
 // ================================================================
+// All positions derived from screen bounds via ratios (never hardcoded)
 static struct {
-    GRect body;
-    GPoint door_c;
-    int16_t door_r, door_ir;
-    GPoint eye_l, eye_r;
-    int16_t eye_rad, pup_rad;
-    int16_t ground_y;
-    GPoint sh_l, elb_l, hnd_l;
-    GPoint sh_r, elb_r, hnd_r;
-    GPoint leg_lt, leg_lb, leg_rt, leg_rb;
-    GRect foot_l, foot_r;
-    GPoint knob_l, knob_c, knob_r;
-    int16_t puddle_rest_hw, puddle_rest_h;
-    int16_t puddle_max_hw, puddle_max_h;
+    GRect body;                          // Machine body rect
+    GPoint door_c;                       // Door circle center
+    int16_t door_r, door_ir;            // Door outer/inner radius
+    GPoint eye_l, eye_r;                // Eye centers
+    int16_t eye_rad, pup_rad;           // Eye/pupil radii
+    int16_t ground_y;                   // Y of ground line
+    GPoint sh_l, elb_l, hnd_l;         // Left arm: shoulder, elbow, hand
+    GPoint sh_r, elb_r, hnd_r;         // Right arm
+    GPoint leg_lt, leg_lb, leg_rt, leg_rb; // Leg tops and bottoms
+    GRect foot_l, foot_r;              // Feet rects
+    GPoint knob_l, knob_c, knob_r;     // Control panel knobs
+    int16_t puddle_rest_hw, puddle_rest_h;  // Puddle resting size
+    int16_t puddle_max_hw, puddle_max_h;    // Puddle max size (during overflow)
 } L;
 
 static void compute_layout(GRect b) {
@@ -420,7 +431,8 @@ static void draw_door(GContext *ctx) {
         graphics_context_set_fill_color(ctx, CLR_INTERIOR);
         graphics_fill_circle(ctx, GPoint(cx, cy), ir);
 
-        // Partial water fill (draining from top)
+        // Partial water fill (drains as door opens).
+        // Draws horizontal lines clipped to the circle using x²+y²=r²
         int water_h = ir * 2 * (100 - s_door_pct) / 100;
         if (water_h > 0) {
             graphics_context_set_fill_color(ctx, CLR_WATER);
