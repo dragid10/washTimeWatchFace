@@ -16,8 +16,12 @@
       "configurable"
     ],
     "targetPlatforms": [
+      "aplite",
+      "basalt",
+      "chalk",
+      "diorite",
       "emery",
-      "basalt"
+      "flint"
     ],
     "watchapp": {
       "watchface": true

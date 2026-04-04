@@ -12,6 +12,19 @@ extern uint32_t MESSAGE_KEY_ShowDate;
 #define N_DROPS       10    // water drop particles
 #define N_SUDS        3     // rotating suds arcs in door
 
+// Color palette (auto-falls back to B&W on aplite/diorite)
+#define CLR_WALL      PBL_IF_COLOR_ELSE(GColorPastelYellow, GColorWhite)
+#define CLR_FLOOR     PBL_IF_COLOR_ELSE(GColorWindsorTan, GColorBlack)
+#define CLR_GROUND    PBL_IF_COLOR_ELSE(GColorBulgarianRose, GColorBlack)
+#define CLR_WATER     PBL_IF_COLOR_ELSE(GColorPictonBlue, GColorBlack)
+#define CLR_RIPPLE    PBL_IF_COLOR_ELSE(GColorCeleste, GColorWhite)
+#define CLR_INTERIOR  PBL_IF_COLOR_ELSE(GColorOxfordBlue, GColorBlack)
+#define CLR_SHADOW    PBL_IF_COLOR_ELSE(GColorLightGray, GColorDarkGray)
+#define CLR_FRAME     GColorDarkGray
+#define CLR_ACCENT    PBL_IF_COLOR_ELSE(GColorRed, GColorBlack)
+#define CLR_SHIRT     PBL_IF_COLOR_ELSE(GColorMelon, GColorLightGray)
+#define CLR_SOCK_BODY GColorWhite
+
 // Animation frame counts (at ANIM_MS per frame)
 #define FR_OPEN       8
 #define FR_OVER       14
@@ -218,15 +231,15 @@ static int lerp(int from, int to, int t) {
 
 static void draw_bg(GContext *ctx) {
     // Wall background
-    graphics_context_set_fill_color(ctx, GColorPastelYellow);
+    graphics_context_set_fill_color(ctx, CLR_WALL);
     graphics_fill_rect(ctx, GRect(0, 0, W, L.ground_y), 0, GCornerNone);
 
     // Floor
-    graphics_context_set_fill_color(ctx, GColorWindsorTan);
+    graphics_context_set_fill_color(ctx, CLR_FLOOR);
     graphics_fill_rect(ctx, GRect(0, L.ground_y, W, H - L.ground_y), 0, GCornerNone);
 
     // Ground line
-    graphics_context_set_stroke_color(ctx, GColorBulgarianRose);
+    graphics_context_set_stroke_color(ctx, CLR_GROUND);
     graphics_context_set_stroke_width(ctx, 2);
     graphics_draw_line(ctx, GPoint(0, L.ground_y), GPoint(W, L.ground_y));
 }
@@ -239,11 +252,11 @@ static void draw_puddle(GContext *ctx) {
     GRect pr = GRect(cx - s_pw, py, s_pw * 2, s_ph);
 
     // Main puddle fill
-    graphics_context_set_fill_color(ctx, GColorPictonBlue);
+    graphics_context_set_fill_color(ctx, CLR_WATER);
     graphics_fill_rect(ctx, pr, 4, GCornersAll);
 
     // Ripple highlights
-    graphics_context_set_stroke_color(ctx, GColorCeleste);
+    graphics_context_set_stroke_color(ctx, CLR_RIPPLE);
     graphics_context_set_stroke_width(ctx, 1);
     for (int i = 0; i < 3; i++) {
         int rx = cx - s_pw / 2 + i * s_pw / 2;
@@ -275,7 +288,7 @@ static void draw_time_text(GContext *ctx) {
     int time_y = py + y_offset;
 
     // Text shadow
-    graphics_context_set_text_color(ctx, GColorOxfordBlue);
+    graphics_context_set_text_color(ctx, CLR_INTERIOR);
     graphics_draw_text(ctx, s_tbuf, time_font,
         GRect(1, time_y + 1, W, time_h + 4),
         GTextOverflowModeTrailingEllipsis,
@@ -301,7 +314,7 @@ static void draw_time_text(GContext *ctx) {
 }
 
 static void draw_legs(GContext *ctx) {
-    graphics_context_set_stroke_color(ctx, GColorDarkGray);
+    graphics_context_set_stroke_color(ctx, CLR_FRAME);
     graphics_context_set_stroke_width(ctx, 3);
 
     // Legs connect body bottom to feet (apply shake to top only)
@@ -313,7 +326,7 @@ static void draw_legs(GContext *ctx) {
         GPoint(L.leg_rb.x, L.leg_rb.y));
 
     // Feet
-    graphics_context_set_fill_color(ctx, GColorDarkGray);
+    graphics_context_set_fill_color(ctx, CLR_FRAME);
     graphics_fill_rect(ctx, L.foot_l, 2, GCornersAll);
     graphics_fill_rect(ctx, L.foot_r, 2, GCornersAll);
 }
@@ -350,7 +363,7 @@ static void draw_shirt_shape(GContext *ctx, int x, int y, int rot, GColor color)
 // Draw a sock with red cuff and toe (used for both in-door and falling)
 static void draw_sock_with_stripe(GContext *ctx, int x, int y) {
     draw_sock_shape(ctx, x, y, 0, GColorWhite);
-    graphics_context_set_fill_color(ctx, GColorRed);
+    graphics_context_set_fill_color(ctx, CLR_ACCENT);
     // Red cuff (top of tube)
     graphics_fill_rect(ctx, GRect(x - 3, y - 6, 5, 3), 0, GCornerNone);
     // Red toe (tip of foot)
@@ -369,7 +382,7 @@ static void draw_body(GContext *ctx) {
     br.origin.y += s_sy;
 
     // Shadow
-    graphics_context_set_fill_color(ctx, GColorLightGray);
+    graphics_context_set_fill_color(ctx, CLR_SHADOW);
     graphics_fill_rect(ctx, GRect(br.origin.x + 2, br.origin.y + 2,
                                    br.size.w, br.size.h), 6, GCornersAll);
 
@@ -378,7 +391,7 @@ static void draw_body(GContext *ctx) {
     graphics_fill_rect(ctx, br, 6, GCornersAll);
 
     // Outline
-    graphics_context_set_stroke_color(ctx, GColorLightGray);
+    graphics_context_set_stroke_color(ctx, CLR_SHADOW);
     graphics_context_set_stroke_width(ctx, 1);
     graphics_draw_round_rect(ctx, br, 6);
 
@@ -393,13 +406,13 @@ static void draw_door(GContext *ctx) {
     // Fill door interior
     if (s_door_pct > 0) {
         // Dark interior visible through open mouth
-        graphics_context_set_fill_color(ctx, GColorOxfordBlue);
+        graphics_context_set_fill_color(ctx, CLR_INTERIOR);
         graphics_fill_circle(ctx, GPoint(cx, cy), ir);
 
         // Partial water fill (draining from top)
         int water_h = ir * 2 * (100 - s_door_pct) / 100;
         if (water_h > 0) {
-            graphics_context_set_fill_color(ctx, GColorPictonBlue);
+            graphics_context_set_fill_color(ctx, CLR_WATER);
             int top = cy - ir;
             int bot = top + water_h;
             if (bot > cy + ir) bot = cy + ir;
@@ -413,7 +426,7 @@ static void draw_door(GContext *ctx) {
         }
     } else {
         // Fully closed: solid blue water
-        graphics_context_set_fill_color(ctx, GColorPictonBlue);
+        graphics_context_set_fill_color(ctx, CLR_WATER);
         graphics_fill_circle(ctx, GPoint(cx, cy), ir);
     }
 
@@ -431,7 +444,7 @@ static void draw_door(GContext *ctx) {
         int32_t shirt_a = s_wash_ph + TRIG_MAX_ANGLE / 2;
         int hx = cx + (int16_t)((int32_t)sin_lookup(shirt_a) * lr / TRIG_MAX_RATIO);
         int hy = cy - (int16_t)((int32_t)cos_lookup(shirt_a) * lr / TRIG_MAX_RATIO);
-        draw_shirt_shape(ctx, hx, hy, 0, GColorMelon);
+        draw_shirt_shape(ctx, hx, hy, 0, CLR_SHIRT);
     }
 
     // Rotating suds / foam (only visible when door mostly closed)
@@ -456,7 +469,7 @@ static void draw_door(GContext *ctx) {
     }
 
     // Door frame
-    graphics_context_set_stroke_color(ctx, GColorDarkGray);
+    graphics_context_set_stroke_color(ctx, CLR_FRAME);
     graphics_context_set_stroke_width(ctx, 3);
     if (s_door_pct > 0) {
         // Partial circle with gap at bottom (mouth open)
@@ -470,17 +483,17 @@ static void draw_door(GContext *ctx) {
     }
 
     // Door handle
-    graphics_context_set_fill_color(ctx, GColorDarkGray);
+    graphics_context_set_fill_color(ctx, CLR_FRAME);
     graphics_fill_circle(ctx, GPoint(cx + or_ - 5, cy + s_sy), 2);
 }
 
 static void draw_knobs(GContext *ctx) {
-    graphics_context_set_fill_color(ctx, GColorDarkGray);
+    graphics_context_set_fill_color(ctx, CLR_FRAME);
     graphics_fill_circle(ctx, GPoint(L.knob_l.x + s_sx, L.knob_l.y + s_sy), 4);
     graphics_fill_circle(ctx, GPoint(L.knob_r.x + s_sx, L.knob_r.y + s_sy), 4);
 
     // Power button (red)
-    graphics_context_set_fill_color(ctx, GColorRed);
+    graphics_context_set_fill_color(ctx, CLR_ACCENT);
     graphics_fill_circle(ctx, GPoint(L.knob_c.x + s_sx, L.knob_c.y + s_sy), 3);
 }
 
@@ -555,7 +568,7 @@ static void draw_eyes(GContext *ctx) {
 }
 
 static void draw_drops(GContext *ctx) {
-    graphics_context_set_fill_color(ctx, GColorPictonBlue);
+    graphics_context_set_fill_color(ctx, CLR_WATER);
     for (int i = 0; i < N_DROPS; i++) {
         if (!s_drops[i].on) continue;
         graphics_fill_circle(ctx,
