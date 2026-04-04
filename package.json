@@ -8,7 +8,7 @@
     "@rebble/clay": "^1.0.8"
   },
   "pebble": {
-    "displayName": "WashTime",
+    "displayName": "Mr. Washy",
     "uuid": "2a642050-1d0d-4a85-8e29-f1d7f59105c1",
     "sdkVersion": "3",
     "enableMultiJS": true,
