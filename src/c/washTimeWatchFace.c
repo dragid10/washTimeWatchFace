@@ -264,39 +264,44 @@ static void draw_time_text(GContext *ctx) {
     if (!s_show_time || s_pw <= 0 || s_ph <= 0) return;
 
     int py = L.ground_y + 2;
-    int time_h = 42;  // LECO_42 height
-    int date_h = s_settings.show_date ? 18 : 0;  // GOTHIC_18 height
-    int gap = s_settings.show_date ? 2 : 0;
-    int content_h = time_h + gap + date_h;
 
-    // Center the content block vertically in puddle
-    int y_offset = (s_ph - content_h) / 2;
+    // Adaptive font: smaller on basalt (144x168)
+    GFont time_font;
+    int time_h;
+    if (H >= 200) {
+        time_font = fonts_get_system_font(FONT_KEY_LECO_42_NUMBERS);
+        time_h = 42;
+    } else {
+        time_font = fonts_get_system_font(FONT_KEY_LECO_28_LIGHT_NUMBERS);
+        time_h = 28;
+    }
+
+    // Center time vertically in puddle
+    int y_offset = (s_ph - time_h) / 2;
     if (y_offset < 0) y_offset = 0;
     int time_y = py + y_offset;
 
     // Text shadow
     graphics_context_set_text_color(ctx, GColorOxfordBlue);
-    graphics_draw_text(ctx, s_tbuf,
-        fonts_get_system_font(FONT_KEY_LECO_42_NUMBERS),
+    graphics_draw_text(ctx, s_tbuf, time_font,
         GRect(1, time_y + 1, W, time_h + 4),
         GTextOverflowModeTrailingEllipsis,
         GTextAlignmentCenter, NULL);
 
     // Time text
     graphics_context_set_text_color(ctx, GColorWhite);
-    graphics_draw_text(ctx, s_tbuf,
-        fonts_get_system_font(FONT_KEY_LECO_42_NUMBERS),
+    graphics_draw_text(ctx, s_tbuf, time_font,
         GRect(0, time_y, W, time_h + 4),
         GTextOverflowModeTrailingEllipsis,
         GTextAlignmentCenter, NULL);
 
-    // Date text (optional)
+    // Date text pinned near screen bottom
     if (s_settings.show_date && s_date_buf[0]) {
-        int date_y = time_y + time_h + gap;
+        int date_y = H - 18;
         graphics_context_set_text_color(ctx, GColorWhite);
         graphics_draw_text(ctx, s_date_buf,
-            fonts_get_system_font(FONT_KEY_GOTHIC_18),
-            GRect(0, date_y, W, date_h + 2),
+            fonts_get_system_font(FONT_KEY_GOTHIC_14),
+            GRect(0, date_y, W, 16),
             GTextOverflowModeTrailingEllipsis,
             GTextAlignmentCenter, NULL);
     }
@@ -863,7 +868,10 @@ static void start_minute_anim(void) {
 
 static void tick_handler(struct tm *tick_time, TimeUnits changed) {
     update_time();
-    start_minute_anim();
+    // Only trigger animation if idle (prevent double-firing)
+    if (s_st == ST_IDLE) {
+        start_minute_anim();
+    }
 }
 
 // ================================================================

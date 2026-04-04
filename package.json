@@ -1,6 +1,6 @@
 {
   "name": "washTimeWatchFace",
-  "author": "MakeAwesomeHappen",
+  "author": "dragid10",
   "version": "1.0.0",
   "keywords": ["pebble-app"],
   "private": true,
@@ -16,7 +16,8 @@
       "configurable"
     ],
     "targetPlatforms": [
-      "emery"
+      "emery",
+      "basalt"
     ],
     "watchapp": {
       "watchface": true
