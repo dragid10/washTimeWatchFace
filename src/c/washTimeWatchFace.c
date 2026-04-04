@@ -364,17 +364,20 @@ static void draw_pants_shape(GContext *ctx, int x, int y, int rot, GColor color)
     }
 }
 
-// Draw the falling sock (with red stripe at cuff)
+// Draw a sock with red cuff and toe (used for both in-door and falling)
+static void draw_sock_with_stripe(GContext *ctx, int x, int y) {
+    draw_sock_shape(ctx, x, y, 0, GColorWhite);
+    graphics_context_set_fill_color(ctx, GColorRed);
+    // Red cuff (top of tube)
+    graphics_fill_rect(ctx, GRect(x - 2, y - 4, 4, 2), 0, GCornerNone);
+    // Red toe (tip of foot)
+    graphics_fill_rect(ctx, GRect(x + 2, y + 2, 2, 3), 0, GCornerNone);
+}
+
+// Draw the falling sock
 static void draw_falling_sock(GContext *ctx) {
     if (!s_sock_active) return;
-    draw_sock_shape(ctx, s_sock_x, s_sock_y, s_sock_rot, GColorWhite);
-    // Red stripe on cuff
-    graphics_context_set_fill_color(ctx, GColorRed);
-    if (s_sock_rot % 2 == 0) {
-        graphics_fill_rect(ctx, GRect(s_sock_x - 2, s_sock_y - 4, 4, 2), 0, GCornerNone);
-    } else {
-        graphics_fill_rect(ctx, GRect(s_sock_x - 4, s_sock_y - 2, 2, 4), 0, GCornerNone);
-    }
+    draw_sock_with_stripe(ctx, s_sock_x, s_sock_y);
 }
 
 static void draw_body(GContext *ctx) {
@@ -439,7 +442,7 @@ static void draw_door(GContext *ctx) {
         int32_t sock_a = s_wash_ph;
         int sx = cx + (int16_t)((int32_t)sin_lookup(sock_a) * lr / TRIG_MAX_RATIO);
         int sy = cy - (int16_t)((int32_t)cos_lookup(sock_a) * lr / TRIG_MAX_RATIO);
-        draw_sock_shape(ctx, sx, sy, 0, GColorWhite);
+        draw_sock_with_stripe(ctx, sx, sy);
 
         // Shirt (pink) — 120 degrees offset
         int32_t shirt_a = s_wash_ph + TRIG_MAX_ANGLE / 3;
@@ -451,7 +454,7 @@ static void draw_door(GContext *ctx) {
         int32_t pants_a = s_wash_ph + 2 * TRIG_MAX_ANGLE / 3;
         int px = cx + (int16_t)((int32_t)sin_lookup(pants_a) * lr / TRIG_MAX_RATIO);
         int py = cy - (int16_t)((int32_t)cos_lookup(pants_a) * lr / TRIG_MAX_RATIO);
-        draw_pants_shape(ctx, px, py, 0, GColorVividCerulean);
+        draw_pants_shape(ctx, px, py, 0, GColorWindsorTan);
     }
 
     // Rotating suds / foam (only visible when door mostly closed)
