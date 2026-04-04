@@ -324,9 +324,9 @@ static void draw_legs(GContext *ctx) {
 static void draw_sock_shape(GContext *ctx, int x, int y, int rot, GColor color) {
     graphics_context_set_fill_color(ctx, color);
     if (rot % 2 == 0) {
-        // Vertical: tube going down, foot pointing right
+        // Vertical: tube going down, foot pointing right (longer toe)
         graphics_fill_rect(ctx, GRect(x - 2, y - 4, 4, 7), 1, GCornersAll);
-        graphics_fill_rect(ctx, GRect(x - 1, y + 2, 5, 3), 1, GCornersAll);
+        graphics_fill_rect(ctx, GRect(x - 1, y + 2, 7, 3), 1, GCornersAll);
     } else {
         // Horizontal: tube going right, foot pointing down
         graphics_fill_rect(ctx, GRect(x - 4, y - 2, 7, 4), 1, GCornersAll);
@@ -371,7 +371,7 @@ static void draw_sock_with_stripe(GContext *ctx, int x, int y) {
     // Red cuff (top of tube)
     graphics_fill_rect(ctx, GRect(x - 2, y - 4, 4, 2), 0, GCornerNone);
     // Red toe (tip of foot)
-    graphics_fill_rect(ctx, GRect(x + 2, y + 2, 2, 3), 0, GCornerNone);
+    graphics_fill_rect(ctx, GRect(x + 3, y + 2, 3, 3), 0, GCornerNone);
 }
 
 // Draw the falling sock
@@ -454,7 +454,7 @@ static void draw_door(GContext *ctx) {
         int32_t pants_a = s_wash_ph + 2 * TRIG_MAX_ANGLE / 3;
         int px = cx + (int16_t)((int32_t)sin_lookup(pants_a) * lr / TRIG_MAX_RATIO);
         int py = cy - (int16_t)((int32_t)cos_lookup(pants_a) * lr / TRIG_MAX_RATIO);
-        draw_pants_shape(ctx, px, py, 0, GColorWindsorTan);
+        draw_pants_shape(ctx, px, py, 0, GColorJaegerGreen);
     }
 
     // Rotating suds / foam (only visible when door mostly closed)
