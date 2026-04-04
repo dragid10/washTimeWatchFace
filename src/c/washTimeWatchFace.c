@@ -301,15 +301,26 @@ static void draw_time_text(GContext *ctx) {
         GTextOverflowModeTrailingEllipsis,
         GTextAlignmentCenter, NULL);
 
-    // Date text pinned near screen bottom
+    // Date text
     if (s_settings.show_date && s_date_buf[0]) {
-        int date_y = H - PBL_IF_ROUND_ELSE(32, 22);
         graphics_context_set_text_color(ctx, GColorWhite);
+        #if defined(PBL_ROUND)
+        // On round: position below time to avoid overlap and bezel clipping
+        int date_y = time_y + time_h + 1;
+        graphics_draw_text(ctx, s_date_buf,
+            fonts_get_system_font(FONT_KEY_GOTHIC_14),
+            GRect(0, date_y, W, 16),
+            GTextOverflowModeTrailingEllipsis,
+            GTextAlignmentCenter, NULL);
+        #else
+        // On rect: pinned near screen bottom
+        int date_y = H - 22;
         graphics_draw_text(ctx, s_date_buf,
             fonts_get_system_font(FONT_KEY_GOTHIC_18),
             GRect(0, date_y, W, 20),
             GTextOverflowModeTrailingEllipsis,
             GTextAlignmentCenter, NULL);
+        #endif
     }
 }
 
