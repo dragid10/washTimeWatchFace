@@ -7,11 +7,8 @@ extern uint32_t MESSAGE_KEY_ShowDate;
 // ================================================================
 // CONSTANTS
 // ================================================================
-#define IDLE_MS       200   // 5 FPS for idle (wash cycle, blink)
-#define ANIM_MS       50    // 20 FPS for overflow animation
-#define BLINK_MIN     12    // min idle ticks between blinks (~2.4s)
-#define BLINK_MAX     20    // max idle ticks between blinks (~4.0s)
-#define BLINK_DUR     2     // blink duration in idle ticks (~400ms)
+#define ANIM_MS       50    // 20 FPS for overflow animation only
+#define BLINK_HOLD_MS 200   // how long eyes stay closed per blink
 #define N_DROPS       10    // water drop particles
 #define N_SUDS        3     // rotating suds arcs in door
 
@@ -59,15 +56,11 @@ static Settings s_settings;
 static AnimState s_st = ST_IDLE;
 static int s_fr = 0;
 
-// Eye blink
-static int s_blink_cd;
+// Eye blink (0 = open, 1 = closed)
 static int s_blink_fr;
 
 // Eye look direction (pupil offset)
-static int8_t s_eye_dx, s_eye_dy;  // pixel offset for pupil
-static int s_look_cd;              // countdown to next look direction change
-#define LOOK_MIN  8   // min idle ticks between look changes (~1.6s)
-#define LOOK_MAX  20  // max idle ticks (~4.0s)
+static int8_t s_eye_dx, s_eye_dy;
 
 // Wash cycle phase
 static int32_t s_wash_ph = 0;
@@ -353,21 +346,6 @@ static void draw_shirt_shape(GContext *ctx, int x, int y, int rot, GColor color)
     }
 }
 
-// Draw pants shape at (x,y) center — ~8x10px
-static void draw_pants_shape(GContext *ctx, int x, int y, int rot, GColor color) {
-    graphics_context_set_fill_color(ctx, color);
-    if (rot % 2 == 0) {
-        // Vertical: waistband + two legs
-        graphics_fill_rect(ctx, GRect(x - 4, y - 4, 8, 3), 1, GCornersAll);
-        graphics_fill_rect(ctx, GRect(x - 4, y - 2, 3, 7), 1, GCornersAll);
-        graphics_fill_rect(ctx, GRect(x + 1, y - 2, 3, 7), 1, GCornersAll);
-    } else {
-        // Horizontal: waistband left + two legs going right
-        graphics_fill_rect(ctx, GRect(x - 4, y - 4, 3, 8), 1, GCornersAll);
-        graphics_fill_rect(ctx, GRect(x - 2, y - 4, 7, 3), 1, GCornersAll);
-        graphics_fill_rect(ctx, GRect(x - 2, y + 1, 7, 3), 1, GCornersAll);
-    }
-}
 
 // Draw a sock with red cuff and toe (used for both in-door and falling)
 static void draw_sock_with_stripe(GContext *ctx, int x, int y) {
@@ -603,38 +581,8 @@ static void canvas_update(Layer *layer, GContext *ctx) {
 }
 
 // ================================================================
-// UPDATE FUNCTIONS
+// UPDATE FUNCTIONS (battery-efficient: no continuous idle timer)
 // ================================================================
-static void update_idle(void) {
-    // Rotate wash cycle suds
-    s_wash_ph = (s_wash_ph + TRIG_MAX_ANGLE / 30) % TRIG_MAX_ANGLE;
-
-    // Arm sway (slightly faster for more movement)
-    s_arm_ph = (s_arm_ph + TRIG_MAX_ANGLE / 30) % TRIG_MAX_ANGLE;
-
-    // Blink logic
-    if (s_blink_fr > 0) {
-        s_blink_fr--;
-    } else {
-        s_blink_cd--;
-        if (s_blink_cd <= 0) {
-            s_blink_fr = BLINK_DUR;
-            s_blink_cd = rng(BLINK_MIN, BLINK_MAX);
-        }
-    }
-
-    // Eye look-around (change gaze direction periodically)
-    s_look_cd--;
-    if (s_look_cd <= 0) {
-        // Pick a new random look direction
-        // max offset is about half the eye radius so pupil stays in sclera
-        int max_off = L.eye_rad / 3;
-        if (max_off < 2) max_off = 2;
-        s_eye_dx = (int8_t)rng(-max_off, max_off);
-        s_eye_dy = (int8_t)rng(-max_off, max_off);
-        s_look_cd = rng(LOOK_MIN, LOOK_MAX);
-    }
-}
 
 // Spawn water drops from the door opening
 static void spawn_drops(void) {
@@ -666,12 +614,18 @@ static void update_drops(void) {
 // ================================================================
 // TIMER CALLBACKS (forward declared)
 // ================================================================
-static void idle_timer_cb(void *data);
+static void blink_start_cb(void *data);
 static void anim_timer_cb(void *data);
+
+// Schedule next blink in 2-4 seconds (battery-efficient: no continuous timer)
+static void schedule_blink(void) {
+    if (s_idle_tmr) { app_timer_cancel(s_idle_tmr); s_idle_tmr = NULL; }
+    s_idle_tmr = app_timer_register(rng(2000, 4000), blink_start_cb, NULL);
+}
 
 static void start_idle(void) {
     if (s_anim_tmr) { app_timer_cancel(s_anim_tmr); s_anim_tmr = NULL; }
-    s_idle_tmr = app_timer_register(IDLE_MS, idle_timer_cb, NULL);
+    schedule_blink();
 }
 
 static void start_anim(void) {
@@ -799,11 +753,34 @@ static void advance_state(void) {
 // ================================================================
 // TIMER CALLBACKS
 // ================================================================
-static void idle_timer_cb(void *data) {
+
+// Blink end: reopen eyes, schedule next blink
+static void blink_end_cb(void *data) {
     s_idle_tmr = NULL;
-    update_idle();
+    s_blink_fr = 0;  // eyes open
     layer_mark_dirty(s_cvs);
-    s_idle_tmr = app_timer_register(IDLE_MS, idle_timer_cb, NULL);
+    if (s_st == ST_IDLE) schedule_blink();
+}
+
+// Blink start: close eyes, nudge wash cycle, change look direction
+static void blink_start_cb(void *data) {
+    s_idle_tmr = NULL;
+    s_blink_fr = 1;  // eyes closed
+
+    // Nudge wash cycle and arm phase (slow idle movement)
+    s_wash_ph = (s_wash_ph + TRIG_MAX_ANGLE / 20) % TRIG_MAX_ANGLE;
+    s_arm_ph = (s_arm_ph + TRIG_MAX_ANGLE / 16) % TRIG_MAX_ANGLE;
+
+    // Change look direction on each blink
+    int max_off = L.eye_rad / 3;
+    if (max_off < 2) max_off = 2;
+    s_eye_dx = (int8_t)rng(-max_off, max_off);
+    s_eye_dy = (int8_t)rng(-max_off, max_off);
+
+    layer_mark_dirty(s_cvs);
+
+    // Schedule eyes to reopen
+    s_idle_tmr = app_timer_register(BLINK_HOLD_MS, blink_end_cb, NULL);
 }
 
 static void anim_timer_cb(void *data) {
@@ -862,6 +839,9 @@ static void start_minute_anim(void) {
 
 static void tick_handler(struct tm *tick_time, TimeUnits changed) {
     update_time();
+    // Advance wash cycle and arm position per minute
+    s_wash_ph = (s_wash_ph + TRIG_MAX_ANGLE / 8) % TRIG_MAX_ANGLE;
+    s_arm_ph = (s_arm_ph + TRIG_MAX_ANGLE / 8) % TRIG_MAX_ANGLE;
     // Only trigger animation if idle (prevent double-firing)
     if (s_st == ST_IDLE) {
         start_minute_anim();
@@ -896,20 +876,18 @@ static void inbox_dropped_callback(AppMessageResult reason, void *context) {
 // ================================================================
 static void window_load(Window *window) {
     Layer *wl = window_get_root_layer(window);
-    GRect bounds = layer_get_bounds(wl);
+    GRect bounds = layer_get_unobstructed_bounds(wl);
 
     compute_layout(bounds);
 
-    s_cvs = layer_create(bounds);
+    s_cvs = layer_create(layer_get_bounds(wl));  // full screen canvas
     layer_set_update_proc(s_cvs, canvas_update);
     layer_add_child(wl, s_cvs);
 
     // Initialize state
     s_st = ST_IDLE;
-    s_blink_cd = rng(BLINK_MIN, BLINK_MAX);
     s_blink_fr = 0;
     s_eye_dx = 0; s_eye_dy = 0;
-    s_look_cd = rng(LOOK_MIN, LOOK_MAX);
     s_door_pct = 0;
     s_pw = L.puddle_rest_hw;
     s_ph = L.puddle_rest_h;
