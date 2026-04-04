@@ -87,6 +87,13 @@ static int16_t s_pw, s_ph;
 // Machine shake offset
 static int8_t s_sx, s_sy;
 
+// Falling sock state (tumbles out during overflow, recedes back)
+static int16_t s_sock_x, s_sock_y;
+static int16_t s_sock_vx, s_sock_vy;
+static int16_t s_sock_land_x, s_sock_land_y;
+static int s_sock_rot;
+static bool s_sock_active;
+
 // Time and date buffers
 static char s_tbuf[8];
 static char s_date_buf[16];
@@ -313,6 +320,47 @@ static void draw_legs(GContext *ctx) {
     graphics_fill_rect(ctx, L.foot_r, 2, GCornersAll);
 }
 
+// Draw a small sock shape at screen position
+static void draw_sock_shape(GContext *ctx, int x, int y, int rot, GColor color) {
+    graphics_context_set_fill_color(ctx, color);
+    if (rot % 2 == 0) {
+        // Vertical sock (tube + toe pointing right)
+        graphics_fill_rect(ctx, GRect(x - 1, y - 3, 3, 6), 0, GCornerNone);
+        graphics_fill_rect(ctx, GRect(x + 1, y + 1, 3, 2), 0, GCornerNone);
+    } else {
+        // Horizontal sock (tube + toe pointing down)
+        graphics_fill_rect(ctx, GRect(x - 3, y - 1, 6, 3), 0, GCornerNone);
+        graphics_fill_rect(ctx, GRect(x + 1, y + 1, 2, 3), 0, GCornerNone);
+    }
+}
+
+// Draw a small shirt shape at screen position
+static void draw_shirt_shape(GContext *ctx, int x, int y, int rot, GColor color) {
+    graphics_context_set_fill_color(ctx, color);
+    if (rot % 2 == 0) {
+        // Upright shirt (shoulders + body)
+        graphics_fill_rect(ctx, GRect(x - 3, y - 1, 7, 2), 0, GCornerNone);
+        graphics_fill_rect(ctx, GRect(x - 1, y, 3, 5), 0, GCornerNone);
+    } else {
+        // Sideways shirt
+        graphics_fill_rect(ctx, GRect(x - 1, y - 3, 2, 7), 0, GCornerNone);
+        graphics_fill_rect(ctx, GRect(x, y - 1, 5, 3), 0, GCornerNone);
+    }
+}
+
+// Draw the falling sock (with red stripe)
+static void draw_falling_sock(GContext *ctx) {
+    if (!s_sock_active) return;
+    draw_sock_shape(ctx, s_sock_x, s_sock_y, s_sock_rot, GColorWhite);
+    // Red stripe on cuff
+    graphics_context_set_fill_color(ctx, GColorRed);
+    if (s_sock_rot % 2 == 0) {
+        graphics_fill_rect(ctx, GRect(s_sock_x - 1, s_sock_y - 3, 3, 2), 0, GCornerNone);
+    } else {
+        graphics_fill_rect(ctx, GRect(s_sock_x - 3, s_sock_y - 1, 2, 3), 0, GCornerNone);
+    }
+}
+
 static void draw_body(GContext *ctx) {
     GRect br = L.body;
     br.origin.x += s_sx;
@@ -367,11 +415,31 @@ static void draw_door(GContext *ctx) {
         graphics_fill_circle(ctx, GPoint(cx, cy), ir);
     }
 
-    // Rotating suds (only visible when door mostly closed)
+    // Laundry tumbling inside door (visible when door mostly closed)
+    if (s_door_pct < 30) {
+        int lr = ir * 5 / 10;  // rotation path radius
+
+        // Sock orbits at wash phase angle
+        int32_t sock_a = s_wash_ph;
+        int sx = cx + (int16_t)((int32_t)sin_lookup(sock_a) * lr / TRIG_MAX_RATIO);
+        int sy = cy - (int16_t)((int32_t)cos_lookup(sock_a) * lr / TRIG_MAX_RATIO);
+        // Rotation changes as it orbits (divide phase into 0/1)
+        int sock_r = (int)(s_wash_ph / (TRIG_MAX_ANGLE / 4)) % 2;
+        draw_sock_shape(ctx, sx, sy, sock_r, GColorWhite);
+
+        // Shirt orbits opposite side
+        int32_t shirt_a = s_wash_ph + TRIG_MAX_ANGLE / 2;
+        int hx = cx + (int16_t)((int32_t)sin_lookup(shirt_a) * lr / TRIG_MAX_RATIO);
+        int hy = cy - (int16_t)((int32_t)cos_lookup(shirt_a) * lr / TRIG_MAX_RATIO);
+        int shirt_r = (int)((s_wash_ph + TRIG_MAX_ANGLE / 4) / (TRIG_MAX_ANGLE / 4)) % 2;
+        draw_shirt_shape(ctx, hx, hy, shirt_r, GColorMelon);
+    }
+
+    // Rotating suds / foam (only visible when door mostly closed)
     if (s_door_pct < 50) {
         graphics_context_set_stroke_color(ctx, GColorWhite);
         graphics_context_set_stroke_width(ctx, 2);
-        int sud_r = ir * 6 / 10;
+        int sud_r = ir * 7 / 10;
         for (int i = 0; i < N_SUDS; i++) {
             int32_t base = s_wash_ph + i * TRIG_MAX_ANGLE / N_SUDS;
             GPoint prev = GPoint(0, 0);
@@ -503,6 +571,7 @@ static void canvas_update(Layer *layer, GContext *ctx) {
     draw_bg(ctx);
     draw_puddle(ctx);
     draw_time_text(ctx);
+    draw_falling_sock(ctx);  // drawn here so body covers it when receding
     draw_legs(ctx);
     draw_body(ctx);
     draw_door(ctx);
@@ -633,6 +702,21 @@ static void advance_state(void) {
                     }
                 }
             }
+            // Sock falls out with gravity, tumbles
+            if (s_sock_active) {
+                s_sock_x += s_sock_vx;
+                s_sock_y += s_sock_vy;
+                s_sock_vy += 1;
+                s_sock_rot++;
+                // Land on the ground
+                if (s_sock_y >= L.ground_y + 8) {
+                    s_sock_y = L.ground_y + 8;
+                    s_sock_vy = 0;
+                    s_sock_vx = 0;
+                    s_sock_land_x = s_sock_x;
+                    s_sock_land_y = s_sock_y;
+                }
+            }
             if (s_fr >= FR_OVER) {
                 s_st = ST_POOL;
                 s_fr = 0;
@@ -659,10 +743,19 @@ static void advance_state(void) {
             s_ph = (int16_t)lerp(L.puddle_max_h, L.puddle_rest_h,
                                   s_fr * 100 / FR_RECEDE);
             s_sx = 0; s_sy = 0;
+            // Sock slides back under the machine
+            if (s_sock_active) {
+                int t = s_fr * 100 / FR_RECEDE;
+                int target_x = W / 2;
+                int target_y = L.body.origin.y + L.body.size.h - 5;
+                s_sock_x = (int16_t)lerp(s_sock_land_x, target_x, t);
+                s_sock_y = (int16_t)lerp(s_sock_land_y, target_y, t);
+            }
             if (s_fr >= FR_RECEDE) {
                 s_st = ST_SETTLE;
                 s_fr = 0;
                 s_door_pct = 0;
+                s_sock_active = false;
             }
             break;
 
@@ -734,6 +827,15 @@ static void start_minute_anim(void) {
     s_door_pct = 0;
     s_show_time = false;  // hide time during overflow
     for (int i = 0; i < N_DROPS; i++) s_drops[i].on = false;
+
+    // Spawn sock to fall out with the water
+    s_sock_x = W / 2 + rng(-5, 5);
+    s_sock_y = L.door_c.y + L.door_ir;
+    s_sock_vx = rng(-1, 2);
+    s_sock_vy = rng(1, 3);
+    s_sock_rot = 0;
+    s_sock_active = true;
+
     start_anim();
 }
 
@@ -790,6 +892,7 @@ static void window_load(Window *window) {
     s_sx = 0;
     s_sy = 0;
     s_show_time = true;
+    s_sock_active = false;
     for (int i = 0; i < N_DROPS; i++) s_drops[i].on = false;
 
     update_time();
