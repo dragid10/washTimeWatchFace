@@ -1,5 +1,9 @@
 #include <pebble.h>
 
+// Auto-generated message keys (defined in message_keys.auto.c)
+extern uint32_t MESSAGE_KEY_TimeFormat;
+extern uint32_t MESSAGE_KEY_ShowDate;
+
 // ================================================================
 // CONSTANTS
 // ================================================================
@@ -18,6 +22,9 @@
 #define FR_RECEDE     14
 #define FR_SETTLE     4
 
+// Persistent storage key
+#define SETTINGS_KEY  1
+
 // ================================================================
 // TYPES
 // ================================================================
@@ -31,6 +38,12 @@ typedef struct {
     bool on;
 } Drop;
 
+// Settings persisted to storage
+typedef struct {
+    int  time_format;  // 0=system, 1=12h, 2=24h
+    bool show_date;
+} Settings;
+
 // ================================================================
 // GLOBALS
 // ================================================================
@@ -39,6 +52,9 @@ static Layer   *s_cvs;
 static AppTimer *s_idle_tmr, *s_anim_tmr;
 static int16_t W, H;
 
+// Settings
+static Settings s_settings;
+
 // Animation state
 static AnimState s_st = ST_IDLE;
 static int s_fr = 0;
@@ -46,6 +62,12 @@ static int s_fr = 0;
 // Eye blink
 static int s_blink_cd;
 static int s_blink_fr;
+
+// Eye look direction (pupil offset)
+static int8_t s_eye_dx, s_eye_dy;  // pixel offset for pupil
+static int s_look_cd;              // countdown to next look direction change
+#define LOOK_MIN  8   // min idle ticks between look changes (~1.6s)
+#define LOOK_MAX  20  // max idle ticks (~4.0s)
 
 // Wash cycle phase
 static int32_t s_wash_ph = 0;
@@ -65,8 +87,9 @@ static int16_t s_pw, s_ph;
 // Machine shake offset
 static int8_t s_sx, s_sy;
 
-// Time buffer
+// Time and date buffers
 static char s_tbuf[8];
+static char s_date_buf[16];
 
 // Whether to show time text in puddle
 static bool s_show_time = true;
@@ -150,11 +173,24 @@ static void compute_layout(GRect b) {
     L.knob_c = GPoint(cx, ky);
     L.knob_r = GPoint(cx + bw * 25 / 100, ky);
 
-    // Puddle sizes
-    L.puddle_rest_hw = W * 33 / 100;
-    L.puddle_rest_h  = H * 18 / 100;
-    L.puddle_max_hw  = W * 43 / 100;
-    L.puddle_max_h   = H * 24 / 100;
+    // Puddle sizes (larger to fit centered time + optional date)
+    L.puddle_rest_hw = W * 40 / 100;
+    L.puddle_rest_h  = H * 26 / 100;
+    L.puddle_max_hw  = W * 46 / 100;
+    L.puddle_max_h   = H * 30 / 100;
+}
+
+// ================================================================
+// SETTINGS
+// ================================================================
+static void load_settings(void) {
+    s_settings.time_format = 0;
+    s_settings.show_date = false;
+    persist_read_data(SETTINGS_KEY, &s_settings, sizeof(s_settings));
+}
+
+static void save_settings(void) {
+    persist_write_data(SETTINGS_KEY, &s_settings, sizeof(s_settings));
 }
 
 // ================================================================
@@ -220,24 +256,43 @@ static void draw_puddle(GContext *ctx) {
 static void draw_time_text(GContext *ctx) {
     if (!s_show_time || s_pw <= 0 || s_ph <= 0) return;
 
-    int cx = W / 2;
     int py = L.ground_y + 2;
+    int time_h = 42;  // LECO_42 height
+    int date_h = s_settings.show_date ? 18 : 0;  // GOTHIC_18 height
+    int gap = s_settings.show_date ? 2 : 0;
+    int content_h = time_h + gap + date_h;
+
+    // Center the content block vertically in puddle
+    int y_offset = (s_ph - content_h) / 2;
+    if (y_offset < 0) y_offset = 0;
+    int time_y = py + y_offset;
 
     // Text shadow
     graphics_context_set_text_color(ctx, GColorOxfordBlue);
-    GRect sr = GRect(cx - s_pw + 1, py + 1, s_pw * 2, s_ph);
     graphics_draw_text(ctx, s_tbuf,
         fonts_get_system_font(FONT_KEY_LECO_42_NUMBERS),
-        sr, GTextOverflowModeTrailingEllipsis,
+        GRect(1, time_y + 1, W, time_h + 4),
+        GTextOverflowModeTrailingEllipsis,
         GTextAlignmentCenter, NULL);
 
     // Time text
     graphics_context_set_text_color(ctx, GColorWhite);
-    GRect tr = GRect(cx - s_pw, py, s_pw * 2, s_ph);
     graphics_draw_text(ctx, s_tbuf,
         fonts_get_system_font(FONT_KEY_LECO_42_NUMBERS),
-        tr, GTextOverflowModeTrailingEllipsis,
+        GRect(0, time_y, W, time_h + 4),
+        GTextOverflowModeTrailingEllipsis,
         GTextAlignmentCenter, NULL);
+
+    // Date text (optional)
+    if (s_settings.show_date && s_date_buf[0]) {
+        int date_y = time_y + time_h + gap;
+        graphics_context_set_text_color(ctx, GColorWhite);
+        graphics_draw_text(ctx, s_date_buf,
+            fonts_get_system_font(FONT_KEY_GOTHIC_18),
+            GRect(0, date_y, W, date_h + 2),
+            GTextOverflowModeTrailingEllipsis,
+            GTextAlignmentCenter, NULL);
+    }
 }
 
 static void draw_legs(GContext *ctx) {
@@ -277,19 +332,6 @@ static void draw_body(GContext *ctx) {
     graphics_context_set_stroke_width(ctx, 1);
     graphics_draw_round_rect(ctx, br, 6);
 
-    // Mouth gap (dark opening from door bottom to body bottom)
-    if (s_door_pct > 0) {
-        int gap_hw = br.size.w * s_door_pct / 400;
-        if (gap_hw < 2) gap_hw = 2;
-        int gap_cx = br.origin.x + br.size.w / 2;
-        int gap_top = L.door_c.y + s_sy + L.door_r + 2;
-        int gap_bot = br.origin.y + br.size.h;
-
-        graphics_context_set_fill_color(ctx, GColorOxfordBlue);
-        graphics_fill_rect(ctx,
-            GRect(gap_cx - gap_hw, gap_top, gap_hw * 2, gap_bot - gap_top + 1),
-            0, GCornerNone);
-    }
 }
 
 static void draw_door(GContext *ctx) {
@@ -376,7 +418,7 @@ static void draw_knobs(GContext *ctx) {
 }
 
 static void draw_arms(GContext *ctx) {
-    int sway = (int)((int32_t)sin_lookup(s_arm_ph) * 3 / TRIG_MAX_RATIO);
+    int sway = (int)((int32_t)sin_lookup(s_arm_ph) * 5 / TRIG_MAX_RATIO);
 
     graphics_context_set_stroke_color(ctx, GColorBlack);
     graphics_context_set_stroke_width(ctx, 3);
@@ -421,12 +463,14 @@ static void draw_one_eye(GContext *ctx, GPoint pos, bool closed) {
         graphics_context_set_stroke_color(ctx, GColorBlack);
         graphics_context_set_stroke_width(ctx, 1);
         graphics_draw_circle(ctx, pos, L.eye_rad);
-        // Pupil
+        // Pupil (offset by look direction)
+        int px = pos.x + s_eye_dx;
+        int py = pos.y + s_eye_dy;
         graphics_context_set_fill_color(ctx, GColorBlack);
-        graphics_fill_circle(ctx, GPoint(pos.x, pos.y + 1), L.pup_rad);
-        // Specular highlight
+        graphics_fill_circle(ctx, GPoint(px, py), L.pup_rad);
+        // Specular highlight (follows pupil)
         graphics_context_set_fill_color(ctx, GColorWhite);
-        graphics_fill_circle(ctx, GPoint(pos.x - 2, pos.y - 2), 2);
+        graphics_fill_circle(ctx, GPoint(px - 2, py - 2), 2);
     } else {
         // Closed eye: horizontal line
         graphics_context_set_stroke_color(ctx, GColorBlack);
@@ -475,8 +519,8 @@ static void update_idle(void) {
     // Rotate wash cycle suds
     s_wash_ph = (s_wash_ph + TRIG_MAX_ANGLE / 30) % TRIG_MAX_ANGLE;
 
-    // Arm sway
-    s_arm_ph = (s_arm_ph + TRIG_MAX_ANGLE / 40) % TRIG_MAX_ANGLE;
+    // Arm sway (slightly faster for more movement)
+    s_arm_ph = (s_arm_ph + TRIG_MAX_ANGLE / 30) % TRIG_MAX_ANGLE;
 
     // Blink logic
     if (s_blink_fr > 0) {
@@ -488,16 +532,30 @@ static void update_idle(void) {
             s_blink_cd = rng(BLINK_MIN, BLINK_MAX);
         }
     }
+
+    // Eye look-around (change gaze direction periodically)
+    s_look_cd--;
+    if (s_look_cd <= 0) {
+        // Pick a new random look direction
+        // max offset is about half the eye radius so pupil stays in sclera
+        int max_off = L.eye_rad / 3;
+        if (max_off < 2) max_off = 2;
+        s_eye_dx = (int8_t)rng(-max_off, max_off);
+        s_eye_dy = (int8_t)rng(-max_off, max_off);
+        s_look_cd = rng(LOOK_MIN, LOOK_MAX);
+    }
 }
 
+// Spawn water drops from the door opening
 static void spawn_drops(void) {
-    int cx = W / 2;
-    int bot = L.body.origin.y + L.body.size.h;
+    int cx = L.door_c.x;
+    int door_bot = L.door_c.y + L.door_ir;
+    int half_w = L.door_ir / 2;
     for (int i = 0; i < N_DROPS; i++) {
-        s_drops[i].x  = cx + rng(-20, 20);
-        s_drops[i].y  = bot + rng(0, 5);
-        s_drops[i].vx = rng(-3, 3);
-        s_drops[i].vy = rng(-2, 1);
+        s_drops[i].x  = cx + rng(-half_w, half_w);
+        s_drops[i].y  = door_bot + rng(0, 4);
+        s_drops[i].vx = rng(-2, 2);
+        s_drops[i].vy = rng(1, 4);
         s_drops[i].sz = rng(2, 4);
         s_drops[i].on = true;
     }
@@ -560,14 +618,15 @@ static void advance_state(void) {
                                   s_fr * 100 / FR_OVER);
             s_ph = (int16_t)lerp(L.puddle_rest_h, L.puddle_max_h,
                                   s_fr * 100 / FR_OVER);
-            // Respawn some drops each few frames
+            // Respawn drops from door opening each few frames
             if (s_fr % 3 == 0) {
+                int door_bot = L.door_c.y + L.door_ir;
                 for (int i = 0; i < N_DROPS; i++) {
                     if (!s_drops[i].on) {
-                        s_drops[i].x  = W / 2 + rng(-15, 15);
-                        s_drops[i].y  = L.body.origin.y + L.body.size.h;
-                        s_drops[i].vx = rng(-3, 3);
-                        s_drops[i].vy = rng(-1, 1);
+                        s_drops[i].x  = W / 2 + rng(-L.door_ir / 2, L.door_ir / 2);
+                        s_drops[i].y  = door_bot;
+                        s_drops[i].vx = rng(-2, 2);
+                        s_drops[i].vy = rng(1, 3);
                         s_drops[i].sz = rng(2, 3);
                         s_drops[i].on = true;
                         break;
@@ -651,8 +710,22 @@ static void update_time(void) {
     time_t t = time(NULL);
     struct tm *tm = localtime(&t);
     if (!tm) return;
+
+    bool use_24h;
+    switch (s_settings.time_format) {
+        case 1:  use_24h = false; break;
+        case 2:  use_24h = true;  break;
+        default: use_24h = clock_is_24h_style(); break;
+    }
+
     strftime(s_tbuf, sizeof(s_tbuf),
-             clock_is_24h_style() ? "%H:%M" : "%I:%M", tm);
+             use_24h ? "%H:%M" : "%I:%M", tm);
+
+    if (s_settings.show_date) {
+        strftime(s_date_buf, sizeof(s_date_buf), "%a %b %d", tm);
+    } else {
+        s_date_buf[0] = '\0';
+    }
 }
 
 static void start_minute_anim(void) {
@@ -667,6 +740,29 @@ static void start_minute_anim(void) {
 static void tick_handler(struct tm *tick_time, TimeUnits changed) {
     update_time();
     start_minute_anim();
+}
+
+// ================================================================
+// APPMESSAGE (Clay settings)
+// ================================================================
+static void inbox_received_callback(DictionaryIterator *iterator, void *context) {
+    Tuple *tf_tuple = dict_find(iterator, MESSAGE_KEY_TimeFormat);
+    Tuple *sd_tuple = dict_find(iterator, MESSAGE_KEY_ShowDate);
+
+    if (tf_tuple) {
+        s_settings.time_format = (int)tf_tuple->value->int32;
+    }
+    if (sd_tuple) {
+        s_settings.show_date = (sd_tuple->value->int32 == 1);
+    }
+
+    save_settings();
+    update_time();
+    layer_mark_dirty(s_cvs);
+}
+
+static void inbox_dropped_callback(AppMessageResult reason, void *context) {
+    APP_LOG(APP_LOG_LEVEL_ERROR, "Message dropped: %d", (int)reason);
 }
 
 // ================================================================
@@ -686,6 +782,8 @@ static void window_load(Window *window) {
     s_st = ST_IDLE;
     s_blink_cd = rng(BLINK_MIN, BLINK_MAX);
     s_blink_fr = 0;
+    s_eye_dx = 0; s_eye_dy = 0;
+    s_look_cd = rng(LOOK_MIN, LOOK_MAX);
     s_door_pct = 0;
     s_pw = L.puddle_rest_hw;
     s_ph = L.puddle_rest_h;
@@ -710,6 +808,9 @@ static void window_unload(Window *window) {
 static void init(void) {
     s_seed = (uint32_t)time(NULL);
 
+    // Load saved settings before creating UI
+    load_settings();
+
     s_win = window_create();
     window_set_background_color(s_win, GColorBlack);
     window_set_window_handlers(s_win, (WindowHandlers) {
@@ -719,6 +820,11 @@ static void init(void) {
     window_stack_push(s_win, true);
 
     tick_timer_service_subscribe(MINUTE_UNIT, tick_handler);
+
+    // Register AppMessage for Clay settings
+    app_message_register_inbox_received(inbox_received_callback);
+    app_message_register_inbox_dropped(inbox_dropped_callback);
+    app_message_open(256, 256);
 }
 
 static void deinit(void) {

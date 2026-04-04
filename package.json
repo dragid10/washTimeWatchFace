@@ -4,18 +4,27 @@
   "version": "1.0.0",
   "keywords": ["pebble-app"],
   "private": true,
-  "dependencies": {},
+  "dependencies": {
+    "@rebble/clay": "^1.0.8"
+  },
   "pebble": {
     "displayName": "WashTime",
     "uuid": "2a642050-1d0d-4a85-8e29-f1d7f59105c1",
     "sdkVersion": "3",
-    "enableMultiJS": false,
+    "enableMultiJS": true,
+    "capabilities": [
+      "configurable"
+    ],
     "targetPlatforms": [
       "emery"
     ],
     "watchapp": {
       "watchface": true
     },
+    "messageKeys": [
+      "TimeFormat",
+      "ShowDate"
+    ],
     "resources": {
       "media": []
     }
