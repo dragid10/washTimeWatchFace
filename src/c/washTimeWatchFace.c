@@ -303,7 +303,7 @@ static void draw_time_text(GContext *ctx) {
 
     // Date text pinned near screen bottom
     if (s_settings.show_date && s_date_buf[0]) {
-        int date_y = H - 22;
+        int date_y = H - PBL_IF_ROUND_ELSE(32, 22);
         graphics_context_set_text_color(ctx, GColorWhite);
         graphics_draw_text(ctx, s_date_buf,
             fonts_get_system_font(FONT_KEY_GOTHIC_18),
