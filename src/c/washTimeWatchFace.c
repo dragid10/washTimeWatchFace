@@ -320,44 +320,60 @@ static void draw_legs(GContext *ctx) {
     graphics_fill_rect(ctx, L.foot_r, 2, GCornersAll);
 }
 
-// Draw a small sock shape at screen position
+// Draw a sock shape at (x,y) center — ~8x10px
 static void draw_sock_shape(GContext *ctx, int x, int y, int rot, GColor color) {
     graphics_context_set_fill_color(ctx, color);
     if (rot % 2 == 0) {
-        // Vertical sock (tube + toe pointing right)
-        graphics_fill_rect(ctx, GRect(x - 1, y - 3, 3, 6), 0, GCornerNone);
-        graphics_fill_rect(ctx, GRect(x + 1, y + 1, 3, 2), 0, GCornerNone);
+        // Vertical: tube going down, foot pointing right
+        graphics_fill_rect(ctx, GRect(x - 2, y - 4, 4, 7), 1, GCornersAll);
+        graphics_fill_rect(ctx, GRect(x - 1, y + 2, 5, 3), 1, GCornersAll);
     } else {
-        // Horizontal sock (tube + toe pointing down)
-        graphics_fill_rect(ctx, GRect(x - 3, y - 1, 6, 3), 0, GCornerNone);
-        graphics_fill_rect(ctx, GRect(x + 1, y + 1, 2, 3), 0, GCornerNone);
+        // Horizontal: tube going right, foot pointing down
+        graphics_fill_rect(ctx, GRect(x - 4, y - 2, 7, 4), 1, GCornersAll);
+        graphics_fill_rect(ctx, GRect(x + 2, y - 1, 3, 5), 1, GCornersAll);
     }
 }
 
-// Draw a small shirt shape at screen position
+// Draw a T-shirt shape at (x,y) center — ~10x10px
 static void draw_shirt_shape(GContext *ctx, int x, int y, int rot, GColor color) {
     graphics_context_set_fill_color(ctx, color);
     if (rot % 2 == 0) {
-        // Upright shirt (shoulders + body)
-        graphics_fill_rect(ctx, GRect(x - 3, y - 1, 7, 2), 0, GCornerNone);
-        graphics_fill_rect(ctx, GRect(x - 1, y, 3, 5), 0, GCornerNone);
+        // Upright: wide shoulders + narrower body
+        graphics_fill_rect(ctx, GRect(x - 5, y - 4, 10, 3), 1, GCornersAll);
+        graphics_fill_rect(ctx, GRect(x - 2, y - 2, 5, 7), 1, GCornersAll);
     } else {
-        // Sideways shirt
-        graphics_fill_rect(ctx, GRect(x - 1, y - 3, 2, 7), 0, GCornerNone);
-        graphics_fill_rect(ctx, GRect(x, y - 1, 5, 3), 0, GCornerNone);
+        // Sideways: rotated 90
+        graphics_fill_rect(ctx, GRect(x - 4, y - 5, 3, 10), 1, GCornersAll);
+        graphics_fill_rect(ctx, GRect(x - 2, y - 2, 7, 5), 1, GCornersAll);
     }
 }
 
-// Draw the falling sock (with red stripe)
+// Draw pants shape at (x,y) center — ~8x10px
+static void draw_pants_shape(GContext *ctx, int x, int y, int rot, GColor color) {
+    graphics_context_set_fill_color(ctx, color);
+    if (rot % 2 == 0) {
+        // Vertical: waistband + two legs
+        graphics_fill_rect(ctx, GRect(x - 4, y - 4, 8, 3), 1, GCornersAll);
+        graphics_fill_rect(ctx, GRect(x - 4, y - 2, 3, 7), 1, GCornersAll);
+        graphics_fill_rect(ctx, GRect(x + 1, y - 2, 3, 7), 1, GCornersAll);
+    } else {
+        // Horizontal: waistband left + two legs going right
+        graphics_fill_rect(ctx, GRect(x - 4, y - 4, 3, 8), 1, GCornersAll);
+        graphics_fill_rect(ctx, GRect(x - 2, y - 4, 7, 3), 1, GCornersAll);
+        graphics_fill_rect(ctx, GRect(x - 2, y + 1, 7, 3), 1, GCornersAll);
+    }
+}
+
+// Draw the falling sock (with red stripe at cuff)
 static void draw_falling_sock(GContext *ctx) {
     if (!s_sock_active) return;
     draw_sock_shape(ctx, s_sock_x, s_sock_y, s_sock_rot, GColorWhite);
     // Red stripe on cuff
     graphics_context_set_fill_color(ctx, GColorRed);
     if (s_sock_rot % 2 == 0) {
-        graphics_fill_rect(ctx, GRect(s_sock_x - 1, s_sock_y - 3, 3, 2), 0, GCornerNone);
+        graphics_fill_rect(ctx, GRect(s_sock_x - 2, s_sock_y - 4, 4, 2), 0, GCornerNone);
     } else {
-        graphics_fill_rect(ctx, GRect(s_sock_x - 3, s_sock_y - 1, 2, 3), 0, GCornerNone);
+        graphics_fill_rect(ctx, GRect(s_sock_x - 4, s_sock_y - 2, 2, 4), 0, GCornerNone);
     }
 }
 
@@ -417,22 +433,25 @@ static void draw_door(GContext *ctx) {
 
     // Laundry tumbling inside door (visible when door mostly closed)
     if (s_door_pct < 30) {
-        int lr = ir * 5 / 10;  // rotation path radius
+        int lr = ir * 4 / 10;  // orbit radius (keep items inside circle)
 
-        // Sock orbits at wash phase angle
+        // Sock (white) — orbits at wash phase
         int32_t sock_a = s_wash_ph;
         int sx = cx + (int16_t)((int32_t)sin_lookup(sock_a) * lr / TRIG_MAX_RATIO);
         int sy = cy - (int16_t)((int32_t)cos_lookup(sock_a) * lr / TRIG_MAX_RATIO);
-        // Rotation changes as it orbits (divide phase into 0/1)
-        int sock_r = (int)(s_wash_ph / (TRIG_MAX_ANGLE / 4)) % 2;
-        draw_sock_shape(ctx, sx, sy, sock_r, GColorWhite);
+        draw_sock_shape(ctx, sx, sy, 0, GColorWhite);
 
-        // Shirt orbits opposite side
-        int32_t shirt_a = s_wash_ph + TRIG_MAX_ANGLE / 2;
+        // Shirt (pink) — 120 degrees offset
+        int32_t shirt_a = s_wash_ph + TRIG_MAX_ANGLE / 3;
         int hx = cx + (int16_t)((int32_t)sin_lookup(shirt_a) * lr / TRIG_MAX_RATIO);
         int hy = cy - (int16_t)((int32_t)cos_lookup(shirt_a) * lr / TRIG_MAX_RATIO);
-        int shirt_r = (int)((s_wash_ph + TRIG_MAX_ANGLE / 4) / (TRIG_MAX_ANGLE / 4)) % 2;
-        draw_shirt_shape(ctx, hx, hy, shirt_r, GColorMelon);
+        draw_shirt_shape(ctx, hx, hy, 0, GColorMelon);
+
+        // Pants (blue) — 240 degrees offset
+        int32_t pants_a = s_wash_ph + 2 * TRIG_MAX_ANGLE / 3;
+        int px = cx + (int16_t)((int32_t)sin_lookup(pants_a) * lr / TRIG_MAX_RATIO);
+        int py = cy - (int16_t)((int32_t)cos_lookup(pants_a) * lr / TRIG_MAX_RATIO);
+        draw_pants_shape(ctx, px, py, 0, GColorVividCerulean);
     }
 
     // Rotating suds / foam (only visible when door mostly closed)
