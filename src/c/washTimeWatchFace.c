@@ -910,14 +910,26 @@ static void inbox_dropped_callback(AppMessageResult reason, void *context) {
 // ================================================================
 // QUICK VIEW (unobstructed area changes)
 // ================================================================
+// Machine stays full size; only puddle/time area adapts
 static void unobstructed_change(AnimationProgress progress, void *context) {
     Layer *wl = window_get_root_layer(s_win);
-    GRect bounds = layer_get_unobstructed_bounds(wl);
-    compute_layout(bounds);
-    // Update puddle to new resting size if idle
-    if (s_st == ST_IDLE) {
-        s_pw = L.puddle_rest_hw;
-        s_ph = L.puddle_rest_h;
+    GRect ub = layer_get_unobstructed_bounds(wl);
+    int avail = ub.size.h - L.ground_y - 4;  // space below ground line
+    if (avail < 10) {
+        // Not enough room: hide puddle entirely
+        if (s_st == ST_IDLE) { s_pw = 0; s_ph = 0; }
+    } else if (avail < L.puddle_rest_h) {
+        // Shrink puddle to fit
+        if (s_st == ST_IDLE) {
+            s_pw = L.puddle_rest_hw;
+            s_ph = (int16_t)avail;
+        }
+    } else {
+        // Full room: restore normal puddle
+        if (s_st == ST_IDLE) {
+            s_pw = L.puddle_rest_hw;
+            s_ph = L.puddle_rest_h;
+        }
     }
     layer_mark_dirty(s_cvs);
 }
@@ -927,11 +939,11 @@ static void unobstructed_change(AnimationProgress progress, void *context) {
 // ================================================================
 static void window_load(Window *window) {
     Layer *wl = window_get_root_layer(window);
-    GRect bounds = layer_get_unobstructed_bounds(wl);
+    GRect full_bounds = layer_get_bounds(wl);
 
-    compute_layout(bounds);
+    compute_layout(full_bounds);  // machine layout always uses full screen
 
-    s_cvs = layer_create(layer_get_bounds(wl));  // full screen canvas
+    s_cvs = layer_create(full_bounds);
     layer_set_update_proc(s_cvs, canvas_update);
     layer_add_child(wl, s_cvs);
 
