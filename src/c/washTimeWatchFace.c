@@ -278,9 +278,7 @@ static void draw_puddle(GContext *ctx) {
 }
 
 static void draw_time_text(GContext *ctx) {
-    if (!s_show_time || s_pw <= 0 || s_ph <= 0) return;
-
-    int py = L.ground_y + 2;
+    if (!s_show_time) return;
 
     // Adaptive font: smaller on basalt (144x168)
     GFont time_font;
@@ -293,24 +291,47 @@ static void draw_time_text(GContext *ctx) {
         time_h = 28;
     }
 
-    // Center time vertically in puddle
-    int y_offset = (s_ph - time_h) / 2;
-    if (y_offset < 0) y_offset = 0;
-    int time_y = py + y_offset;
+    int time_y;
 
-    // Text shadow
-    graphics_context_set_text_color(ctx, CLR_INTERIOR);
-    graphics_draw_text(ctx, s_tbuf, time_font,
-        GRect(1, time_y + 1, W, time_h + 4),
-        GTextOverflowModeTrailingEllipsis,
-        GTextAlignmentCenter, NULL);
+    if (s_pw > 0 && s_ph > 0) {
+        // Normal mode: time centered in puddle
+        int py = L.ground_y + 2;
+        int y_offset = (s_ph - time_h) / 2;
+        if (y_offset < 0) y_offset = 0;
+        time_y = py + y_offset;
 
-    // Time text
-    graphics_context_set_text_color(ctx, GColorWhite);
-    graphics_draw_text(ctx, s_tbuf, time_font,
-        GRect(0, time_y, W, time_h + 4),
-        GTextOverflowModeTrailingEllipsis,
-        GTextAlignmentCenter, NULL);
+        // Text shadow
+        graphics_context_set_text_color(ctx, CLR_INTERIOR);
+        graphics_draw_text(ctx, s_tbuf, time_font,
+            GRect(1, time_y + 1, W, time_h + 4),
+            GTextOverflowModeTrailingEllipsis,
+            GTextAlignmentCenter, NULL);
+
+        // Time text
+        graphics_context_set_text_color(ctx, GColorWhite);
+        graphics_draw_text(ctx, s_tbuf, time_font,
+            GRect(0, time_y, W, time_h + 4),
+            GTextOverflowModeTrailingEllipsis,
+            GTextAlignmentCenter, NULL);
+    } else {
+        // Quick View compact: show time on machine body (digital display)
+        time_y = L.body.origin.y + L.body.size.h - time_h - 8;
+        int bx = L.body.origin.x;
+        int bw = L.body.size.w;
+
+        // Blue display strip on the machine body
+        graphics_context_set_fill_color(ctx, CLR_WATER);
+        graphics_fill_rect(ctx, GRect(bx + 6, time_y - 2, bw - 12, time_h + 6),
+                           3, GCornersAll);
+
+        // Time text on the display
+        graphics_context_set_text_color(ctx, GColorWhite);
+        graphics_draw_text(ctx, s_tbuf, time_font,
+            GRect(0, time_y, W, time_h + 4),
+            GTextOverflowModeTrailingEllipsis,
+            GTextAlignmentCenter, NULL);
+        return;  // no date in compact mode
+    }
 
     // Date text
     if (s_settings.show_date && s_date_buf[0]) {
@@ -603,14 +624,28 @@ static void draw_drops(GContext *ctx) {
 // CANVAS UPDATE PROC
 // ================================================================
 static void canvas_update(Layer *layer, GContext *ctx) {
+    // Detect Quick View by comparing unobstructed vs full bounds
+    if (s_st == ST_IDLE) {
+        Layer *wl = window_get_root_layer(s_win);
+        int avail = layer_get_unobstructed_bounds(wl).size.h - L.ground_y - 4;
+        if (avail < 10) {
+            s_pw = 0; s_ph = 0;
+        } else if (s_pw == 0 && s_ph == 0) {
+            s_pw = L.puddle_rest_hw;
+            s_ph = L.puddle_rest_h;
+        }
+    }
+
+    bool compact = (s_pw <= 0 || s_ph <= 0);
     draw_bg(ctx);
     draw_puddle(ctx);
-    draw_time_text(ctx);
-    draw_falling_sock(ctx);  // drawn here so body covers it when receding
+    if (!compact) draw_time_text(ctx);
+    draw_falling_sock(ctx);
     draw_legs(ctx);
     draw_body(ctx);
     draw_door(ctx);
     draw_knobs(ctx);
+    if (compact) draw_time_text(ctx);  // on body, after body draws
     draw_arms(ctx);
     draw_eyes(ctx);
     draw_drops(ctx);
