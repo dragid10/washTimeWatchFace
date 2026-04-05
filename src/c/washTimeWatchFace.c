@@ -908,6 +908,21 @@ static void inbox_dropped_callback(AppMessageResult reason, void *context) {
 }
 
 // ================================================================
+// QUICK VIEW (unobstructed area changes)
+// ================================================================
+static void unobstructed_change(AnimationProgress progress, void *context) {
+    Layer *wl = window_get_root_layer(s_win);
+    GRect bounds = layer_get_unobstructed_bounds(wl);
+    compute_layout(bounds);
+    // Update puddle to new resting size if idle
+    if (s_st == ST_IDLE) {
+        s_pw = L.puddle_rest_hw;
+        s_ph = L.puddle_rest_h;
+    }
+    layer_mark_dirty(s_cvs);
+}
+
+// ================================================================
 // WINDOW HANDLERS
 // ================================================================
 static void window_load(Window *window) {
@@ -919,6 +934,14 @@ static void window_load(Window *window) {
     s_cvs = layer_create(layer_get_bounds(wl));  // full screen canvas
     layer_set_update_proc(s_cvs, canvas_update);
     layer_add_child(wl, s_cvs);
+
+    // Subscribe to Quick View / timeline peek changes
+    UnobstructedAreaHandlers ua_handlers = {
+        .change = unobstructed_change,
+    };
+    unobstructed_area_service_subscribe(ua_handlers, NULL);
+    // Apply in case Quick View is already active at startup
+    unobstructed_change(0, NULL);
 
     // Initialize state
     s_st = ST_IDLE;
