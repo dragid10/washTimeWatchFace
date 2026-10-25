@@ -55,9 +55,7 @@ extern uint32_t MESSAGE_KEY_WeatherRequest;
 #define SETTINGS_VERSION 2
 
 // Info slot contents (SlotLeft / SlotRight)
-enum { SLOT_NONE, SLOT_WEATHER, SLOT_STEPS, SLOT_HEART, SLOT_BATTERY, SLOT_HEART_LIVE };
-
-#define HR_LIVE_PERIOD_S 5   // requested sensor interval for live heart rate
+enum { SLOT_NONE, SLOT_WEATHER, SLOT_STEPS, SLOT_HEART, SLOT_BATTERY };
 
 // Weather condition categories (mapped from WMO codes in pkjs)
 enum { WX_CLEAR, WX_CLOUDY, WX_RAIN, WX_SNOW, WX_STORM, WX_FOG };
@@ -621,7 +619,6 @@ static bool slot_text(int slot, char *buf, size_t len) {
             }
             return true;
         case SLOT_HEART:
-        case SLOT_HEART_LIVE:
 #if defined(PBL_HEALTH)
             if (s_heart > 0) snprintf(buf, len, "%d", (int)s_heart);
             else snprintf(buf, len, "--");
@@ -654,8 +651,7 @@ static void draw_slot(GContext *ctx, int slot, GRect box, bool right) {
     switch (slot) {
         case SLOT_WEATHER: draw_icon_weather(ctx, x, icon_y, s_weather.code); break;
         case SLOT_STEPS:   draw_icon_steps(ctx, x, icon_y); break;
-        case SLOT_HEART:
-        case SLOT_HEART_LIVE: draw_icon_heart(ctx, x, icon_y); break;
+        case SLOT_HEART:   draw_icon_heart(ctx, x, icon_y); break;
         case SLOT_BATTERY: draw_icon_battery(ctx, x, icon_y); break;
     }
 
@@ -1243,19 +1239,6 @@ static void update_health(void) {
 #endif
 }
 
-static bool heart_slot_used(void) {
-    return slot_used(SLOT_HEART) || slot_used(SLOT_HEART_LIVE);
-}
-
-// Live mode asks the system to sample the sensor often (costs battery), and
-// only while awake. Otherwise hand control back to the system's own schedule.
-static void update_hr_sampling(void) {
-#if defined(PBL_HEALTH)
-    bool live = slot_used(SLOT_HEART_LIVE) && !s_sleeping;
-    health_service_set_heart_rate_sample_period(live ? HR_LIVE_PERIOD_S : 0);
-#endif
-}
-
 static bool is_asleep(void) {
 #if defined(PBL_HEALTH)
     HealthActivityMask act = health_service_peek_current_activities();
@@ -1287,7 +1270,7 @@ static void bt_handler(bool connected) {
 static void health_handler(HealthEventType event, void *context) {
     if (event == HealthEventSleepUpdate) return;  // re-checked each minute
     update_health();
-    if (slot_used(SLOT_STEPS) || heart_slot_used()) layer_mark_dirty(s_cvs);
+    if (slot_used(SLOT_STEPS) || slot_used(SLOT_HEART)) layer_mark_dirty(s_cvs);
 }
 #endif
 
@@ -1315,7 +1298,6 @@ static void update_sleeping(void) {
         schedule_blink();
     }
     update_tick_subscription();
-    update_hr_sampling();
     update_time();
     layer_mark_dirty(s_cvs);
 }
@@ -1415,7 +1397,6 @@ static void inbox_received_callback(DictionaryIterator *iterator, void *context)
     update_health();
     update_sleeping();
     update_tick_subscription();
-    update_hr_sampling();
     update_time();
     layer_mark_dirty(s_cvs);
 }
@@ -1491,7 +1472,6 @@ static void init(void) {
     s_battery = battery_state_service_peek().charge_percent;
     update_health();
     s_sleeping = s_settings.sleepy && is_asleep();
-    update_hr_sampling();
 
     s_win = window_create();
     window_set_background_color(s_win, GColorBlack);
@@ -1521,7 +1501,6 @@ static void deinit(void) {
     battery_state_service_unsubscribe();
     connection_service_unsubscribe();
 #if defined(PBL_HEALTH)
-    health_service_set_heart_rate_sample_period(0);  // release live sampling
     health_service_events_unsubscribe();
 #endif
     if (s_win) { window_destroy(s_win); s_win = NULL; }
