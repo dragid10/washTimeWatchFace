@@ -16,15 +16,28 @@ washTimeWatchFace/
   wscript                   # Waf build configuration (do not modify unless adding worker)
   src/
     c/
-      washTimeWatchFace.c   # Complete watchface implementation (single file)
+      washTimeWatchFace.c   # Watchface implementation (drawing, state machine, services)
+      logic.c / logic.h     # Pure logic with no Pebble deps (unit tested on desktop)
     pkjs/
-      index.js              # PebbleKit JS entry — Clay configuration init
-      config.js             # Clay config page definition (time format, show date)
+      index.js              # PebbleKit JS entry — Clay settings + Open-Meteo weather fetch
+      config.js             # Clay config page definition
+      custom-clay.js        # Show/hide config items (custom colors, date style)
+      weather.js            # Pure weather helpers (unit tested)
+  test/                     # JS tests (node:test) and C tests (test/c) — `npm test`
+  scripts/test-c.sh         # builds + runs the C tests with gcc (or host gcc via host-spawn)
   resources/                # Empty — no custom resources (uses system fonts only)
   build/                    # Build output (gitignored)
     washTimeWatchFace.pbw   # Installable watchface bundle
   node_modules/             # npm deps — @rebble/clay (gitignored)
 ```
+
+## Testing rule — run tests before every push
+
+Run `npm run check` (JS tests + C tests + `pebble build` for all platforms) before **every** `git push`, and fix failures first. Tests run locally only; **no GitHub Actions**.
+
+- Put new logic that doesn't need the Pebble SDK in `src/c/logic.c` with a test in `test/c/test_logic.c`, and add JS tests under `test/`.
+- When fixing a bug, add a regression test for it.
+- `npm test` = `npm run test:js` + `npm run test:c`.
 
 ## Build & Test Commands
 
@@ -51,12 +64,13 @@ Single-file architecture with these sections:
 | Constants & Types | Animation timing, frame counts, `AnimState` enum, `Drop` struct, `Settings` struct |
 | Globals | Window, Layer, timers, animation state, eye/arm/wash phases, puddle size, time buffers |
 | Layout | `compute_layout()` — derives all positions from `layer_get_bounds()` using ratios |
-| Settings | `load_settings()` / `save_settings()` via `persist_read_data` / `persist_write_data` |
+| Settings | `load_settings()` / `save_settings()` (versioned struct, migrates 1.x), `apply_theme()` |
+| Info slots | `draw_slots()` — weather / steps / heart rate / battery in the top wall corners |
 | Drawing | 10 draw functions called back-to-front in `canvas_update()` |
-| Updates | `update_idle()` — wash cycle, arm sway, blink, eye look-around |
-| Timers | Idle timer (200ms/5FPS) for idle animations, Anim timer (50ms/20FPS) for overflow |
+| Info sources | `update_health()`, battery/BT handlers, `request_weather()`, `update_sleeping()` |
+| Timers | Blink timer (every 5-9s, no continuous idle timer), Anim timer (50ms/20FPS) for overflow |
 | State Machine | `advance_state()` — ST_IDLE → ST_OPEN → ST_OVER → ST_POOL → ST_RECEDE → ST_SETTLE → ST_IDLE |
-| AppMessage | `inbox_received_callback()` — receives Clay settings (TimeFormat, ShowDate) |
+| AppMessage | `inbox_received_callback()` — Clay settings and weather (`WeatherTemp`, `WeatherCode`) |
 
 ### Draw Order (painter's algorithm)
 
@@ -81,21 +95,21 @@ IDLE ──(minute tick)──→ OPEN (8fr) → OVER (14fr) → POOL (10fr) →
                          shake on      puddle grows  puddle max    puddle shrinks  idle timer restarts
 ```
 
-- **Idle timer** (200ms): runs continuously for wash cycle rotation, eye blink/look-around, arm sway
+- **Blink timer** (5-9s): each blink nudges wash cycle, arm sway and look direction; skipped while sleepy
 - **Anim timer** (50ms): runs only during overflow animation, then stops
 
 ### Clay Configuration
 
-Settings page with two options:
-- **Time Format**: System Default / 12-Hour / 24-Hour (select, messageKey: `TimeFormat`)
-- **Show Date**: toggle (messageKey: `ShowDate`)
+Sections: Time & Date (`TimeFormat`, `ShowSeconds`, `ShowDate`, `DateFormat`), Extras (`SlotLeft`, `SlotRight`, `TempUnits`), Theme (`Theme`, `WallColor`, `FloorColor`), Watch (`SleepyMode`, `BtVibrate`).
 
-Settings are persisted via `persist_write_data` with key `SETTINGS_KEY=1`.
+Clay sends **select/radio values as strings** — read them with `tuple_int()`, never `->int32` directly. Color pickers send 0xRRGGBB ints (convert with `GColorFromHEX`).
+
+Settings persist under `SETTINGS_KEY=2` with a `version` field; bump `SETTINGS_VERSION` when changing the struct. Key 1 holds 1.x settings and is migrated on load. Weather persists under `WEATHER_KEY=3`. After adding messageKeys, run `pebble clean` before building.
 
 ## Key Constraints
 
 - **No floating point** — use `sin_lookup()` / `cos_lookup()` with `TRIG_MAX_ANGLE` / `TRIG_MAX_RATIO`
-- **MINUTE_UNIT only** for `tick_timer_service_subscribe` — never SECOND_UNIT
+- **MINUTE_UNIT by default** — SECOND_UNIT only while "Show seconds" is on and not sleepy (`update_tick_subscription()`)
 - **Dynamic bounds** — all positions derived from `layer_get_bounds()`, never hardcoded pixel values
 - **Clean resources** — all timers cancelled and layers destroyed in `window_unload()`
 - **Register before open** — `app_message_register_inbox_received()` must be called before `app_message_open()`

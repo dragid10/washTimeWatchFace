@@ -9,8 +9,10 @@ An anthropomorphic washing machine watchface for Pebble smartwatches.
 - **Animated wash cycle** - Clothes (sock and shirt) tumble inside the door with rotating suds
 - **Overflow animation** - Each minute, the door opens and water overflows to reveal the updated time. A sock tumbles out with the water before sliding back under the machine
 - **Living character** - Eyes blink and look around, arms sway gently
-- **Configurable** - Choose between system/12-hour/24-hour time format. Optional date display
-- **Battery efficient** - No continuous timer. Brief redraws only during blinks (~every 3s) and the minute overflow animation
+- **Info corners** - Optional weather, steps, heart rate or battery in the top corners
+- **Themes** - Five color presets or your own wall and floor colors
+- **Sleepy mode** - Animation stops during Quiet Time or while you sleep
+- **Battery efficient** - No continuous timer. Brief redraws only during blinks (every 5-9s) and the minute overflow animation; seconds are opt-in
 - **All platforms** - Runs on every Pebble watch with automatic color/B&W and round/rectangular adaptation
 
 ## Supported Platforms
@@ -41,10 +43,14 @@ pebble install --emulator emery  # emulator
 
 Open the Pebble app on your phone, go to the Mr. Washy settings:
 
-- **Time Format** - System Default, 12-Hour, or 24-Hour
-- **Show Date** - Toggle date display below the time
+- **Time & Date** - Time format (watch default, 12-hour, 24-hour), seconds, date and date style
+- **Extras** - What to show in the top-left and top-right corners: weather, steps, heart rate or battery; °F or °C
+- **Theme** - Classic, Midnight, Mint, Lavender, Sunset, or custom wall/floor colors
+- **Watch** - Sleepy Mr. Washy (no animation during Quiet Time or sleep), buzz on phone disconnect
 
-Settings are powered by [Clay](https://github.com/nicbarker/clay) and persist across watch restarts.
+Weather comes from [Open-Meteo](https://open-meteo.com/) (no API key) using your phone's location, refreshed every 30 minutes.
+
+Settings are powered by [Clay](https://github.com/pebble/clay) and persist across watch restarts.
 
 ## Project Structure
 
@@ -57,8 +63,11 @@ washTimeWatchFace/
     c/
       washTimeWatchFace.c     # Complete watchface (single file)
     pkjs/
-      index.js                # Clay configuration init
+      index.js                # Settings + weather fetch
       config.js               # Settings page definition
+      custom-clay.js          # Show/hide settings on the config page
+      weather.js              # Open-Meteo URL + response mapping
+  test/                       # JS tests; test/c has desktop C tests for src/c/logic.c
   resources/                  # (empty - uses system fonts only)
 ```
 
@@ -72,7 +81,7 @@ IDLE ──(minute tick)──> OPEN ──> OVER ──> POOL ──> RECEDE �
                         opens    fall     shows    closes
 ```
 
-- **Idle**: No continuous timer. A blink fires every 2-4 seconds, briefly nudging the wash cycle and arm position
+- **Idle**: No continuous timer. A blink fires every 5-9 seconds, briefly nudging the wash cycle and arm position
 - **Overflow**: Runs at 20 FPS (50ms) for ~2.5 seconds, then stops
 
 ### Drawing (Painter's Algorithm)
@@ -99,6 +108,11 @@ pebble publish                                  # Publish to App Store
 ```
 
 After modifying `package.json` dependencies, run `npm install` before building.
+
+```bash
+npm test           # JS tests + desktop C tests (needs gcc)
+npm run check      # tests + pebble build for every platform; run before pushing
+```
 
 ## License
 

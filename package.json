@@ -1,8 +1,10 @@
 {
   "name": "washTimeWatchFace",
   "author": "dragid10",
-  "version": "1.1.0",
-  "keywords": ["pebble-app"],
+  "version": "1.2.0",
+  "keywords": [
+    "pebble-app"
+  ],
   "private": true,
   "dependencies": {
     "@rebble/clay": "^1.0.8"
@@ -13,7 +15,9 @@
     "sdkVersion": "3",
     "enableMultiJS": true,
     "capabilities": [
-      "configurable"
+      "configurable",
+      "health",
+      "location"
     ],
     "targetPlatforms": [
       "aplite",
@@ -29,10 +33,29 @@
     },
     "messageKeys": [
       "TimeFormat",
-      "ShowDate"
+      "ShowDate",
+      "DateFormat",
+      "ShowSeconds",
+      "SlotLeft",
+      "SlotRight",
+      "TempUnits",
+      "BtVibrate",
+      "SleepyMode",
+      "Theme",
+      "WallColor",
+      "FloorColor",
+      "WeatherTemp",
+      "WeatherCode",
+      "WeatherRequest"
     ],
     "resources": {
       "media": []
     }
+  },
+  "scripts": {
+    "test:js": "node --test",
+    "test:c": "sh scripts/test-c.sh",
+    "test": "npm run test:js && npm run test:c",
+    "check": "npm test && pebble build"
   }
 }
