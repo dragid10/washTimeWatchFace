@@ -16,18 +16,28 @@ washTimeWatchFace/
   wscript                   # Waf build configuration (do not modify unless adding worker)
   src/
     c/
-      washTimeWatchFace.c   # Complete watchface implementation (single file)
+      washTimeWatchFace.c   # Watchface implementation (drawing, state machine, services)
+      logic.c / logic.h     # Pure logic with no Pebble deps (unit tested on desktop)
     pkjs/
       index.js              # PebbleKit JS entry — Clay settings + Open-Meteo weather fetch
       config.js             # Clay config page definition
       custom-clay.js        # Show/hide config items (custom colors, date style)
       weather.js            # Pure weather helpers (unit tested)
-  test/                     # node:test unit tests — `npm test` (local only, no CI)
+  test/                     # JS tests (node:test) and C tests (test/c) — `npm test`
+  scripts/test-c.sh         # builds + runs the C tests with gcc (or host gcc via host-spawn)
   resources/                # Empty — no custom resources (uses system fonts only)
   build/                    # Build output (gitignored)
     washTimeWatchFace.pbw   # Installable watchface bundle
   node_modules/             # npm deps — @rebble/clay (gitignored)
 ```
+
+## Testing rule — run tests before every push
+
+Run `npm run check` (JS tests + C tests + `pebble build` for all platforms) before **every** `git push`, and fix failures first. Tests run locally only; **no GitHub Actions**.
+
+- Put new logic that doesn't need the Pebble SDK in `src/c/logic.c` with a test in `test/c/test_logic.c`, and add JS tests under `test/`.
+- When fixing a bug, add a regression test for it.
+- `npm test` = `npm run test:js` + `npm run test:c`.
 
 ## Build & Test Commands
 

@@ -67,7 +67,7 @@ washTimeWatchFace/
       config.js               # Settings page definition
       custom-clay.js          # Show/hide settings on the config page
       weather.js              # Open-Meteo URL + response mapping
-  test/                       # JS unit tests (npm test)
+  test/                       # JS tests; test/c has desktop C tests for src/c/logic.c
   resources/                  # (empty - uses system fonts only)
 ```
 
@@ -107,7 +107,12 @@ pebble logs --emulator emery                    # View runtime logs
 pebble publish                                  # Publish to App Store
 ```
 
-After modifying `package.json` dependencies, run `npm install` before building. Run `npm test` for the JS unit tests.
+After modifying `package.json` dependencies, run `npm install` before building.
+
+```bash
+npm test           # JS tests + desktop C tests (needs gcc)
+npm run check      # tests + pebble build for every platform; run before pushing
+```
 
 ## License
 

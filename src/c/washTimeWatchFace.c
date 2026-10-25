@@ -1,4 +1,5 @@
 #include <pebble.h>
+#include "logic.h"
 
 // Auto-generated message keys (defined in message_keys.auto.c)
 extern uint32_t MESSAGE_KEY_TimeFormat;
@@ -52,16 +53,7 @@ extern uint32_t MESSAGE_KEY_WeatherRequest;
 #define SETTINGS_KEY_V1 1   // original {time_format, show_date} struct
 #define SETTINGS_KEY    2   // current Settings struct (versioned)
 #define WEATHER_KEY     3
-#define SETTINGS_VERSION 2
 
-// Info slot contents (SlotLeft / SlotRight)
-enum { SLOT_NONE, SLOT_WEATHER, SLOT_STEPS, SLOT_HEART, SLOT_BATTERY };
-
-// Weather condition categories (mapped from WMO codes in pkjs)
-enum { WX_CLEAR, WX_CLOUDY, WX_RAIN, WX_SNOW, WX_STORM, WX_FOG };
-
-#define THEME_CUSTOM      5
-#define WEATHER_STALE_S   (3 * 60 * 60)  // show "--" after 3h without data
 #define WEATHER_EVERY_MIN 30
 
 // ================================================================
@@ -86,30 +78,6 @@ typedef struct {
     uint8_t sz;      // radius
     bool on;         // active flag
 } Drop;
-
-// Settings persisted to storage. Bump SETTINGS_VERSION when changing.
-typedef struct {
-    uint8_t version;
-    uint8_t time_format;   // 0=system, 1=12h, 2=24h
-    bool    show_date;
-    uint8_t date_format;   // 0="Sat Oct 25", 1="10/25", 2="25/10"
-    bool    show_seconds;
-    uint8_t slot_left;     // SLOT_*
-    uint8_t slot_right;
-    uint8_t temp_units;    // 0=F, 1=C (conversion happens in pkjs)
-    bool    bt_vibrate;
-    bool    sleepy;        // freeze animation in Quiet Time / sleep
-    uint8_t theme;         // 0-4 presets, THEME_CUSTOM uses colors below
-    uint8_t wall_argb;
-    uint8_t floor_argb;
-} Settings;
-
-// Last weather received from the phone (persisted)
-typedef struct {
-    int16_t temp;
-    uint8_t code;          // WX_*
-    int32_t updated;       // time() of last update, 0 = never
-} Weather;
 
 // ================================================================
 // GLOBALS
@@ -275,27 +243,19 @@ static void compute_layout(GRect b) {
 // SETTINGS
 // ================================================================
 static void load_settings(void) {
-    s_settings = (Settings) {
-        .version = SETTINGS_VERSION,
-        .slot_left = SLOT_NONE,
-        .slot_right = SLOT_NONE,
-        .bt_vibrate = false,
-        .sleepy = true,
-        .wall_argb = GColorPastelYellowARGB8,
-        .floor_argb = GColorWindsorTanARGB8,
-    };
+    wl_settings_defaults(&s_settings, GColorPastelYellowARGB8, GColorWindsorTanARGB8);
     if (persist_exists(SETTINGS_KEY)) {
         Settings saved;
         int n = persist_read_data(SETTINGS_KEY, &saved, sizeof(saved));
         if (n == (int)sizeof(saved) && saved.version == SETTINGS_VERSION) {
             s_settings = saved;
+            wl_settings_sanitize(&s_settings);
         }
     } else if (persist_exists(SETTINGS_KEY_V1)) {
         // Migrate 1.x settings
         struct { int time_format; bool show_date; } old;
         persist_read_data(SETTINGS_KEY_V1, &old, sizeof(old));
-        s_settings.time_format = (uint8_t)old.time_format;
-        s_settings.show_date = old.show_date;
+        wl_settings_from_v1(&s_settings, old.time_format, old.show_date);
     }
     if (persist_exists(WEATHER_KEY)) {
         persist_read_data(WEATHER_KEY, &s_weather, sizeof(s_weather));
@@ -308,8 +268,7 @@ static void save_settings(void) {
 
 // Dark text on light walls, white on dark ones (sum of 2-bit RGB channels)
 static GColor text_for(GColor bg) {
-    int lum = bg.r + bg.g + bg.b;
-    return lum >= 5 ? GColorBlack : GColorWhite;
+    return wl_dark_text_on(bg.r, bg.g, bg.b) ? GColorBlack : GColorWhite;
 }
 
 static void apply_theme(void) {
@@ -362,23 +321,10 @@ static int rng(int lo, int hi) {
     return lo + (int)((s_seed >> 16) % (unsigned)(hi - lo + 1));
 }
 
-static int16_t isqrt(int32_t n) {
-    if (n <= 0) return 0;
-    int32_t x = n, y = (x + 1) / 2;
-    while (y < x) { x = y; y = (x + n / x) / 2; }
-    return (int16_t)x;
-}
-
-static int lerp(int from, int to, int t) {
-    return from + (to - from) * t / 100;
-}
-
 // Set puddle size, clamped to the area Quick View leaves visible.
 // Too little room hides the puddle (time moves onto the machine body).
 static void set_puddle(int hw, int h) {
-    if (s_avail_h < 10) { s_pw = 0; s_ph = 0; return; }
-    s_pw = (int16_t)hw;
-    s_ph = (int16_t)(h < s_avail_h ? h : s_avail_h);
+    wl_clamp_puddle(s_avail_h, hw, h, &s_pw, &s_ph);
 }
 
 // ================================================================
@@ -603,25 +549,13 @@ static void draw_icon_battery(GContext *ctx, int x, int y) {
 static bool slot_text(int slot, char *buf, size_t len) {
     switch (slot) {
         case SLOT_WEATHER:
-            if (s_weather.updated == 0 ||
-                time(NULL) - s_weather.updated > WEATHER_STALE_S) {
-                snprintf(buf, len, "--°");
-            } else {
-                snprintf(buf, len, "%d°", s_weather.temp);
-            }
+            wl_weather_text(&s_weather, (int32_t)time(NULL), buf, len);
             return true;
         case SLOT_STEPS:
-            if (s_steps < 0) return false;
-            if (s_steps >= 10000) {
-                snprintf(buf, len, "%d.%dk", (int)(s_steps / 1000), (int)(s_steps % 1000 / 100));
-            } else {
-                snprintf(buf, len, "%d", (int)s_steps);
-            }
-            return true;
+            return wl_steps_text(s_steps, buf, len);
         case SLOT_HEART:
 #if defined(PBL_HEALTH)
-            if (s_heart > 0) snprintf(buf, len, "%d", (int)s_heart);
-            else snprintf(buf, len, "--");
+            wl_heart_text(s_heart, buf, len);
             return true;
 #else
             return false;
@@ -794,7 +728,7 @@ static void draw_door(GContext *ctx) {
                 int dy = y - cy;
                 int32_t val = (int32_t)ir * ir - (int32_t)dy * dy;
                 if (val <= 0) continue;
-                int dx = isqrt(val);
+                int dx = wl_isqrt(val);
                 graphics_draw_line(ctx, GPoint(cx - dx, y), GPoint(cx + dx, y));
             }
         }
@@ -1049,8 +983,8 @@ static void advance_state(void) {
             s_sx = (int8_t)rng(-2, 2);
             s_sy = (int8_t)rng(-1, 1);
             // Grow puddle toward max
-            set_puddle(lerp(L.puddle_rest_hw, L.puddle_max_hw, s_fr * 100 / FR_OVER),
-                       lerp(L.puddle_rest_h, L.puddle_max_h, s_fr * 100 / FR_OVER));
+            set_puddle(wl_lerp(L.puddle_rest_hw, L.puddle_max_hw, s_fr * 100 / FR_OVER),
+                       wl_lerp(L.puddle_rest_h, L.puddle_max_h, s_fr * 100 / FR_OVER));
             // Respawn drops from door opening each few frames
             if (s_fr % 3 == 0) {
                 int door_bot = L.door_c.y + L.door_ir;
@@ -1102,16 +1036,16 @@ static void advance_state(void) {
         case ST_RECEDE:
             s_door_pct = 100 - (100 * s_fr / FR_RECEDE);
             if (s_door_pct < 0) s_door_pct = 0;
-            set_puddle(lerp(L.puddle_max_hw, L.puddle_rest_hw, s_fr * 100 / FR_RECEDE),
-                       lerp(L.puddle_max_h, L.puddle_rest_h, s_fr * 100 / FR_RECEDE));
+            set_puddle(wl_lerp(L.puddle_max_hw, L.puddle_rest_hw, s_fr * 100 / FR_RECEDE),
+                       wl_lerp(L.puddle_max_h, L.puddle_rest_h, s_fr * 100 / FR_RECEDE));
             s_sx = 0; s_sy = 0;
             // Sock slides back under the machine
             if (s_sock_active) {
                 int t = s_fr * 100 / FR_RECEDE;
                 int target_x = W / 2;
                 int target_y = L.body.origin.y + L.body.size.h - 5;
-                s_sock_x = (int16_t)lerp(s_sock_land_x, target_x, t);
-                s_sock_y = (int16_t)lerp(s_sock_land_y, target_y, t);
+                s_sock_x = (int16_t)wl_lerp(s_sock_land_x, target_x, t);
+                s_sock_y = (int16_t)wl_lerp(s_sock_land_y, target_y, t);
             }
             if (s_fr >= FR_RECEDE) {
                 s_st = ST_SETTLE;
@@ -1198,9 +1132,7 @@ static void update_time(void) {
     strftime(s_tbuf, sizeof(s_tbuf),
              use_24h ? "%H:%M" : "%I:%M", tm);
     // 12-hour: "9:30", not "09:30"
-    if (!use_24h && s_tbuf[0] == '0') {
-        memmove(s_tbuf, s_tbuf + 1, strlen(s_tbuf));
-    }
+    if (!use_24h) wl_trim_leading_zero(s_tbuf);
 
     if (s_settings.show_seconds && !s_sleeping) {
         strftime(s_sbuf, sizeof(s_sbuf), ":%S", tm);

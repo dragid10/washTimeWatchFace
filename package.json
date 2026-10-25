@@ -53,6 +53,9 @@
     }
   },
   "scripts": {
-    "test": "node --test"
+    "test:js": "node --test",
+    "test:c": "sh scripts/test-c.sh",
+    "test": "npm run test:js && npm run test:c",
+    "check": "npm test && pebble build"
   }
 }
