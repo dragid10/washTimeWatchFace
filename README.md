@@ -114,6 +114,10 @@ npm test           # JS tests + desktop C tests (needs gcc)
 npm run check      # tests + pebble build for every platform; run before pushing
 ```
 
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md).
+
 ## License
 
 MIT
