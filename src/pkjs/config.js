@@ -2,7 +2,8 @@ var SLOT_OPTIONS = [
   { "label": "Nothing", "value": "0" },
   { "label": "Weather", "value": "1" },
   { "label": "Steps", "value": "2" },
-  { "label": "Heart rate", "value": "3" },
+  { "label": "Heart rate (auto)", "value": "3" },
+  { "label": "Heart rate (live)", "value": "5" },
   { "label": "Battery", "value": "4" }
 ];
 
@@ -62,7 +63,7 @@ module.exports = [
       { "type": "heading", "defaultValue": "Extras" },
       {
         "type": "text",
-        "defaultValue": "Show extra info in the top corners, above Mr. Washy's arms."
+        "defaultValue": "Show extra info in the top corners, above Mr. Washy's arms. Heart rate (auto) shows the watch's latest reading and can be a few minutes old. Heart rate (live) asks the sensor to measure every few seconds, which uses more battery."
       },
       {
         "type": "select",
