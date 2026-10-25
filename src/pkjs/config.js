@@ -62,7 +62,7 @@ module.exports = [
       { "type": "heading", "defaultValue": "Extras" },
       {
         "type": "text",
-        "defaultValue": "Show extra info in the top corners, above Mr. Washy's arms. Heart rate shows the watch's latest reading, so how fresh it is depends on the \"Background sampling\" interval in the Health tab of the Pebble app."
+        "defaultValue": "Show extra info in the top corners, above Mr. Washy's arms. Heart rate shows the watch's latest reading, so it can be a few minutes old. How often the watch measures is set by the system and your Health settings in the Pebble app."
       },
       {
         "type": "select",
