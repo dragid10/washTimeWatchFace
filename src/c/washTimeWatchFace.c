@@ -3,6 +3,19 @@
 // Auto-generated message keys (defined in message_keys.auto.c)
 extern uint32_t MESSAGE_KEY_TimeFormat;
 extern uint32_t MESSAGE_KEY_ShowDate;
+extern uint32_t MESSAGE_KEY_DateFormat;
+extern uint32_t MESSAGE_KEY_ShowSeconds;
+extern uint32_t MESSAGE_KEY_SlotLeft;
+extern uint32_t MESSAGE_KEY_SlotRight;
+extern uint32_t MESSAGE_KEY_TempUnits;
+extern uint32_t MESSAGE_KEY_BtVibrate;
+extern uint32_t MESSAGE_KEY_SleepyMode;
+extern uint32_t MESSAGE_KEY_Theme;
+extern uint32_t MESSAGE_KEY_WallColor;
+extern uint32_t MESSAGE_KEY_FloorColor;
+extern uint32_t MESSAGE_KEY_WeatherTemp;
+extern uint32_t MESSAGE_KEY_WeatherCode;
+extern uint32_t MESSAGE_KEY_WeatherRequest;
 
 // ================================================================
 // CONSTANTS
@@ -14,13 +27,14 @@ extern uint32_t MESSAGE_KEY_ShowDate;
 #define N_DROPS       10    // water drop particles
 #define N_SUDS        3     // rotating suds arcs in door
 
-// Color palette (auto-falls back to B&W on aplite/diorite)
-#define CLR_WALL      PBL_IF_COLOR_ELSE(GColorPastelYellow, GColorWhite)
-#define CLR_FLOOR     PBL_IF_COLOR_ELSE(GColorWindsorTan, GColorBlack)
-#define CLR_GROUND    PBL_IF_COLOR_ELSE(GColorBulgarianRose, GColorBlack)
-#define CLR_WATER     PBL_IF_COLOR_ELSE(GColorPictonBlue, GColorBlack)
-#define CLR_RIPPLE    PBL_IF_COLOR_ELSE(GColorCeleste, GColorWhite)
-#define CLR_INTERIOR  PBL_IF_COLOR_ELSE(GColorOxfordBlue, GColorBlack)
+// Theme colors (set by apply_theme(); B&W on aplite/diorite/flint)
+#define CLR_WALL      s_theme.wall
+#define CLR_FLOOR     s_theme.floor
+#define CLR_GROUND    s_theme.ground
+#define CLR_WATER     s_theme.water
+#define CLR_RIPPLE    s_theme.ripple
+#define CLR_INTERIOR  s_theme.interior
+#define CLR_SLOT_TEXT s_theme.slot_text
 #define CLR_SHADOW    PBL_IF_COLOR_ELSE(GColorLightGray, GColorDarkGray)
 #define CLR_FRAME     GColorDarkGray
 #define CLR_ACCENT    PBL_IF_COLOR_ELSE(GColorRed, GColorBlack)
@@ -34,8 +48,21 @@ extern uint32_t MESSAGE_KEY_ShowDate;
 #define FR_RECEDE     14
 #define FR_SETTLE     4
 
-// Persistent storage key
-#define SETTINGS_KEY  1
+// Persistent storage keys
+#define SETTINGS_KEY_V1 1   // original {time_format, show_date} struct
+#define SETTINGS_KEY    2   // current Settings struct (versioned)
+#define WEATHER_KEY     3
+#define SETTINGS_VERSION 2
+
+// Info slot contents (SlotLeft / SlotRight)
+enum { SLOT_NONE, SLOT_WEATHER, SLOT_STEPS, SLOT_HEART, SLOT_BATTERY };
+
+// Weather condition categories (mapped from WMO codes in pkjs)
+enum { WX_CLEAR, WX_CLOUDY, WX_RAIN, WX_SNOW, WX_STORM, WX_FOG };
+
+#define THEME_CUSTOM      5
+#define WEATHER_STALE_S   (3 * 60 * 60)  // show "--" after 3h without data
+#define WEATHER_EVERY_MIN 30
 
 // ================================================================
 // TYPES
@@ -60,11 +87,29 @@ typedef struct {
     bool on;         // active flag
 } Drop;
 
-// Settings persisted to storage
+// Settings persisted to storage. Bump SETTINGS_VERSION when changing.
 typedef struct {
-    int  time_format;  // 0=system, 1=12h, 2=24h
-    bool show_date;
+    uint8_t version;
+    uint8_t time_format;   // 0=system, 1=12h, 2=24h
+    bool    show_date;
+    uint8_t date_format;   // 0="Sat Oct 25", 1="10/25", 2="25/10"
+    bool    show_seconds;
+    uint8_t slot_left;     // SLOT_*
+    uint8_t slot_right;
+    uint8_t temp_units;    // 0=F, 1=C (conversion happens in pkjs)
+    bool    bt_vibrate;
+    bool    sleepy;        // freeze animation in Quiet Time / sleep
+    uint8_t theme;         // 0-4 presets, THEME_CUSTOM uses colors below
+    uint8_t wall_argb;
+    uint8_t floor_argb;
 } Settings;
+
+// Last weather received from the phone (persisted)
+typedef struct {
+    int16_t temp;
+    uint8_t code;          // WX_*
+    int32_t updated;       // time() of last update, 0 = never
+} Weather;
 
 // ================================================================
 // GLOBALS
@@ -76,6 +121,22 @@ static int16_t W, H;
 
 // Settings
 static Settings s_settings;
+
+// Active theme colors
+static struct {
+    GColor wall, floor, ground, water, ripple, interior, slot_text;
+} s_theme;
+
+// Info slot data
+static Weather s_weather;
+static int32_t s_steps = -1;     // -1 = unavailable
+static int32_t s_heart = 0;      // 0 = no reading
+static uint8_t s_battery = 100;
+
+// Sleepy mode currently in effect (animation frozen)
+static bool s_sleeping = false;
+// Tick unit currently subscribed
+static TimeUnits s_tick_unit = 0;
 
 // Animation state
 static AnimState s_st = ST_IDLE;
@@ -114,6 +175,7 @@ static bool s_sock_active;
 
 // Time and date buffers
 static char s_tbuf[8];
+static char s_sbuf[4];   // ":SS" when seconds are shown
 static char s_date_buf[16];
 
 // Space below the ground line not covered by Quick View
@@ -213,13 +275,83 @@ static void compute_layout(GRect b) {
 // SETTINGS
 // ================================================================
 static void load_settings(void) {
-    s_settings.time_format = 0;
-    s_settings.show_date = false;
-    persist_read_data(SETTINGS_KEY, &s_settings, sizeof(s_settings));
+    s_settings = (Settings) {
+        .version = SETTINGS_VERSION,
+        .slot_left = SLOT_NONE,
+        .slot_right = SLOT_NONE,
+        .bt_vibrate = false,
+        .sleepy = true,
+        .wall_argb = GColorPastelYellowARGB8,
+        .floor_argb = GColorWindsorTanARGB8,
+    };
+    if (persist_exists(SETTINGS_KEY)) {
+        Settings saved;
+        int n = persist_read_data(SETTINGS_KEY, &saved, sizeof(saved));
+        if (n == (int)sizeof(saved) && saved.version == SETTINGS_VERSION) {
+            s_settings = saved;
+        }
+    } else if (persist_exists(SETTINGS_KEY_V1)) {
+        // Migrate 1.x settings
+        struct { int time_format; bool show_date; } old;
+        persist_read_data(SETTINGS_KEY_V1, &old, sizeof(old));
+        s_settings.time_format = (uint8_t)old.time_format;
+        s_settings.show_date = old.show_date;
+    }
+    if (persist_exists(WEATHER_KEY)) {
+        persist_read_data(WEATHER_KEY, &s_weather, sizeof(s_weather));
+    }
 }
 
 static void save_settings(void) {
     persist_write_data(SETTINGS_KEY, &s_settings, sizeof(s_settings));
+}
+
+// Dark text on light walls, white on dark ones (sum of 2-bit RGB channels)
+static GColor text_for(GColor bg) {
+    int lum = bg.r + bg.g + bg.b;
+    return lum >= 5 ? GColorBlack : GColorWhite;
+}
+
+static void apply_theme(void) {
+#if defined(PBL_COLOR)
+    // wall, floor, ground, water
+    static const uint8_t presets[][4] = {
+        { GColorPastelYellowARGB8, GColorWindsorTanARGB8,
+          GColorBulgarianRoseARGB8, GColorPictonBlueARGB8 },      // Laundry room
+        { GColorOxfordBlueARGB8, GColorDarkGrayARGB8,
+          GColorBlackARGB8, GColorVividCeruleanARGB8 },            // Midnight
+        { GColorMintGreenARGB8, GColorArmyGreenARGB8,
+          GColorDarkGreenARGB8, GColorPictonBlueARGB8 },           // Mint
+        { GColorRichBrilliantLavenderARGB8, GColorImperialPurpleARGB8,
+          GColorBlackARGB8, GColorVividCeruleanARGB8 },            // Lavender
+        { GColorRajahARGB8, GColorBulgarianRoseARGB8,
+          GColorBlackARGB8, GColorPictonBlueARGB8 },               // Sunset
+    };
+    int t = s_settings.theme;
+    if (t == THEME_CUSTOM) {
+        s_theme.wall   = (GColor){ .argb = s_settings.wall_argb };
+        s_theme.floor  = (GColor){ .argb = s_settings.floor_argb };
+        s_theme.ground = GColorBlack;
+        s_theme.water  = GColorPictonBlue;
+    } else {
+        if (t >= (int)ARRAY_LENGTH(presets)) t = 0;
+        s_theme.wall   = (GColor){ .argb = presets[t][0] };
+        s_theme.floor  = (GColor){ .argb = presets[t][1] };
+        s_theme.ground = (GColor){ .argb = presets[t][2] };
+        s_theme.water  = (GColor){ .argb = presets[t][3] };
+    }
+    s_theme.ripple    = GColorCeleste;
+    s_theme.interior  = GColorOxfordBlue;
+    s_theme.slot_text = text_for(s_theme.wall);
+#else
+    s_theme.wall = GColorWhite;
+    s_theme.floor = GColorBlack;
+    s_theme.ground = GColorBlack;
+    s_theme.water = GColorBlack;
+    s_theme.ripple = GColorWhite;
+    s_theme.interior = GColorBlack;
+    s_theme.slot_text = GColorBlack;
+#endif
 }
 
 // ================================================================
@@ -344,19 +476,40 @@ static void draw_time_text(GContext *ctx) {
     if (y_offset < 0) y_offset = 0;
     int time_y = L.ground_y + 2 + y_offset;
 
+    // Time (+ optional smaller ":SS"), centered together as one run
+    GRect tr = GRect(0, time_y, W, time_h + 4);
+    GTextAlignment align = GTextAlignmentCenter;
+    GFont sec_font = NULL;
+    GRect sr = GRectZero;
+    if (s_sbuf[0]) {
+        sec_font = fonts_get_system_font(H >= 200 ? FONT_KEY_LECO_20_BOLD_NUMBERS
+                                                  : FONT_KEY_GOTHIC_14_BOLD);
+        int sec_h = H >= 200 ? 20 : 14;
+        GSize tsz = graphics_text_layout_get_content_size(s_tbuf, time_font,
+            GRect(0, 0, W, time_h + 4), GTextOverflowModeWordWrap, GTextAlignmentLeft);
+        GSize ssz = graphics_text_layout_get_content_size(s_sbuf, sec_font,
+            GRect(0, 0, W, sec_h + 4), GTextOverflowModeWordWrap, GTextAlignmentLeft);
+        int x0 = (W - tsz.w - ssz.w - 2) / 2;
+        tr = GRect(x0, time_y, tsz.w + 2, time_h + 4);
+        sr = GRect(x0 + tsz.w + 2, time_y + time_h - sec_h - 2, ssz.w + 2, sec_h + 4);
+        align = GTextAlignmentLeft;
+    }
+
     // Text shadow
     graphics_context_set_text_color(ctx, CLR_INTERIOR);
-    graphics_draw_text(ctx, s_tbuf, time_font,
-        GRect(1, time_y + 1, W, time_h + 4),
-        GTextOverflowModeTrailingEllipsis,
-        GTextAlignmentCenter, NULL);
+    graphics_draw_text(ctx, s_tbuf, time_font, GRect(tr.origin.x + 1, tr.origin.y + 1,
+        tr.size.w, tr.size.h), GTextOverflowModeFill, align, NULL);
+    if (sec_font) {
+        graphics_draw_text(ctx, s_sbuf, sec_font, GRect(sr.origin.x + 1, sr.origin.y + 1,
+            sr.size.w, sr.size.h), GTextOverflowModeFill, align, NULL);
+    }
 
     // Time text
     graphics_context_set_text_color(ctx, GColorWhite);
-    graphics_draw_text(ctx, s_tbuf, time_font,
-        GRect(0, time_y, W, time_h + 4),
-        GTextOverflowModeTrailingEllipsis,
-        GTextAlignmentCenter, NULL);
+    graphics_draw_text(ctx, s_tbuf, time_font, tr, GTextOverflowModeFill, align, NULL);
+    if (sec_font) {
+        graphics_draw_text(ctx, s_sbuf, sec_font, sr, GTextOverflowModeFill, align, NULL);
+    }
 
     if (date) {
         graphics_draw_text(ctx, s_date_buf, date_font,
@@ -364,6 +517,168 @@ static void draw_time_text(GContext *ctx) {
             GTextOverflowModeTrailingEllipsis,
             GTextAlignmentCenter, NULL);
     }
+}
+
+// ---- Info slots (top corners of the wall, above the arms) ----
+
+#define ICON_W 12
+
+static void draw_icon_weather(GContext *ctx, int x, int y, int code) {
+    // (x, y) = top-left of a 12x12 box
+    GColor fg = CLR_SLOT_TEXT;
+    graphics_context_set_fill_color(ctx, fg);
+    graphics_context_set_stroke_color(ctx, fg);
+    graphics_context_set_stroke_width(ctx, 1);
+    if (code == WX_CLEAR) {
+        GPoint c = GPoint(x + 6, y + 6);
+        graphics_fill_circle(ctx, c, 3);
+        for (int i = 0; i < 8; i++) {
+            int32_t a = i * TRIG_MAX_ANGLE / 8;
+            int dx = sin_lookup(a) * 6 / TRIG_MAX_RATIO;
+            int dy = cos_lookup(a) * 6 / TRIG_MAX_RATIO;
+            graphics_draw_pixel(ctx, GPoint(c.x + dx, c.y - dy));
+        }
+        return;
+    }
+    if (code == WX_FOG) {
+        for (int i = 0; i < 3; i++) {
+            graphics_draw_line(ctx, GPoint(x + 1 + (i % 2), y + 3 + i * 3),
+                                    GPoint(x + 10 - (i % 2), y + 3 + i * 3));
+        }
+        return;
+    }
+    // Cloud body shared by cloudy / rain / snow / storm
+    graphics_fill_circle(ctx, GPoint(x + 4, y + 5), 3);
+    graphics_fill_circle(ctx, GPoint(x + 7, y + 4), 3);
+    graphics_fill_rect(ctx, GRect(x + 1, y + 5, 10, 3), 1, GCornersAll);
+    if (code == WX_RAIN) {
+        for (int i = 0; i < 3; i++) {
+            graphics_draw_line(ctx, GPoint(x + 3 + i * 3, y + 9), GPoint(x + 2 + i * 3, y + 11));
+        }
+    } else if (code == WX_SNOW) {
+        for (int i = 0; i < 3; i++) graphics_draw_pixel(ctx, GPoint(x + 3 + i * 3, y + 10 + (i % 2)));
+    } else if (code == WX_STORM) {
+        graphics_draw_line(ctx, GPoint(x + 7, y + 8), GPoint(x + 5, y + 10));
+        graphics_draw_line(ctx, GPoint(x + 5, y + 10), GPoint(x + 7, y + 10));
+        graphics_draw_line(ctx, GPoint(x + 7, y + 10), GPoint(x + 5, y + 12));
+    }
+}
+
+static void draw_icon_steps(GContext *ctx, int x, int y) {
+    // Two footprints
+    graphics_context_set_fill_color(ctx, CLR_SLOT_TEXT);
+    graphics_fill_rect(ctx, GRect(x + 1, y + 1, 4, 6), 2, GCornersAll);
+    graphics_fill_rect(ctx, GRect(x + 1, y + 8, 4, 2), 1, GCornersAll);
+    graphics_fill_rect(ctx, GRect(x + 7, y + 3, 4, 6), 2, GCornersAll);
+    graphics_fill_rect(ctx, GRect(x + 7, y + 10, 4, 2), 1, GCornersAll);
+}
+
+static void draw_icon_heart(GContext *ctx, int x, int y) {
+    graphics_context_set_fill_color(ctx, PBL_IF_COLOR_ELSE(GColorRed, CLR_SLOT_TEXT));
+    graphics_context_set_stroke_color(ctx, PBL_IF_COLOR_ELSE(GColorRed, CLR_SLOT_TEXT));
+    graphics_fill_circle(ctx, GPoint(x + 3, y + 4), 3);
+    graphics_fill_circle(ctx, GPoint(x + 8, y + 4), 3);
+    // Taper to a point: rows shrinking toward the bottom tip
+    for (int r = 0; r < 6; r++) {
+        graphics_draw_line(ctx, GPoint(x + r, y + 5 + r), GPoint(x + 11 - r, y + 5 + r));
+    }
+}
+
+static void draw_icon_battery(GContext *ctx, int x, int y) {
+    GColor fg = CLR_SLOT_TEXT;
+    graphics_context_set_stroke_color(ctx, fg);
+    graphics_context_set_stroke_width(ctx, 1);
+    graphics_draw_rect(ctx, GRect(x, y + 3, 10, 7));
+    graphics_context_set_fill_color(ctx, fg);
+    graphics_fill_rect(ctx, GRect(x + 10, y + 5, 2, 3), 0, GCornerNone);
+    int fill = 8 * s_battery / 100;
+    if (fill < 1) fill = 1;
+#if defined(PBL_COLOR)
+    if (s_battery <= 20) graphics_context_set_fill_color(ctx, GColorRed);
+#endif
+    graphics_fill_rect(ctx, GRect(x + 1, y + 4, fill, 5), 0, GCornerNone);
+}
+
+// Format a slot's value; returns false if there is nothing to show
+static bool slot_text(int slot, char *buf, size_t len) {
+    switch (slot) {
+        case SLOT_WEATHER:
+            if (s_weather.updated == 0 ||
+                time(NULL) - s_weather.updated > WEATHER_STALE_S) {
+                snprintf(buf, len, "--°");
+            } else {
+                snprintf(buf, len, "%d°", s_weather.temp);
+            }
+            return true;
+        case SLOT_STEPS:
+            if (s_steps < 0) return false;
+            if (s_steps >= 10000) {
+                snprintf(buf, len, "%d.%dk", (int)(s_steps / 1000), (int)(s_steps % 1000 / 100));
+            } else {
+                snprintf(buf, len, "%d", (int)s_steps);
+            }
+            return true;
+        case SLOT_HEART:
+#if defined(PBL_HEALTH)
+            if (s_heart > 0) snprintf(buf, len, "%d", (int)s_heart);
+            else snprintf(buf, len, "--");
+            return true;
+#else
+            return false;
+#endif
+        case SLOT_BATTERY:
+            snprintf(buf, len, "%d%%", s_battery);
+            return true;
+        default:
+            return false;
+    }
+}
+
+// Draw one slot as [icon][text], left- or right-aligned inside `box`
+static void draw_slot(GContext *ctx, int slot, GRect box, bool right) {
+    char buf[12];
+    if (!slot_text(slot, buf, sizeof(buf))) return;
+
+    GFont f = fonts_get_system_font(H >= 200 ? FONT_KEY_GOTHIC_18_BOLD
+                                             : FONT_KEY_GOTHIC_14_BOLD);
+    GSize tsz = graphics_text_layout_get_content_size(buf, f,
+        GRect(0, 0, box.size.w, box.size.h), GTextOverflowModeFill, GTextAlignmentLeft);
+    int total = ICON_W + 2 + tsz.w;
+    if (total > box.size.w) total = box.size.w;
+    int x = right ? box.origin.x + box.size.w - total : box.origin.x;
+    int icon_y = box.origin.y + (box.size.h - 12) / 2 + 1;
+
+    switch (slot) {
+        case SLOT_WEATHER: draw_icon_weather(ctx, x, icon_y, s_weather.code); break;
+        case SLOT_STEPS:   draw_icon_steps(ctx, x, icon_y); break;
+        case SLOT_HEART:   draw_icon_heart(ctx, x, icon_y); break;
+        case SLOT_BATTERY: draw_icon_battery(ctx, x, icon_y); break;
+    }
+
+    graphics_context_set_text_color(ctx, CLR_SLOT_TEXT);
+    // Gothic glyphs sit low in their box; nudge up so text centers on the icon
+    int fh = H >= 200 ? 18 : 14;
+    graphics_draw_text(ctx, buf, f,
+        GRect(x + ICON_W + 2, box.origin.y + (box.size.h - fh) / 2 - fh / 4,
+              box.size.w - ICON_W - 2, fh + 4),
+        GTextOverflowModeFill, GTextAlignmentLeft, NULL);
+}
+
+static void draw_slots(GContext *ctx) {
+#if defined(PBL_ROUND)
+    // Round screens clip the top corners; sit lower and further in
+    int y = H * 14 / 100;
+    int inset = W * 12 / 100;
+#else
+    int y = 3;
+    int inset = 3;
+#endif
+    // Each slot spans from the screen edge to just short of the nearest eye
+    int w = L.eye_l.x - L.eye_rad - 3 - inset;
+    int h = H >= 200 ? 20 : 16;
+    if (w < 20) return;
+    draw_slot(ctx, s_settings.slot_left, GRect(inset, y, w, h), false);
+    draw_slot(ctx, s_settings.slot_right, GRect(W - inset - w, y, w, h), true);
 }
 
 static void draw_legs(GContext *ctx) {
@@ -641,6 +956,7 @@ static void draw_drops(GContext *ctx) {
 static void canvas_update(Layer *layer, GContext *ctx) {
     bool compact = (s_pw <= 0 || s_ph <= 0);
     draw_bg(ctx);
+    draw_slots(ctx);
     draw_puddle(ctx);
     if (!compact) draw_time_text(ctx);
     draw_falling_sock(ctx);
@@ -694,6 +1010,7 @@ static void anim_timer_cb(void *data);
 // Schedule next blink in 5-9 seconds (battery-efficient: no continuous timer)
 static void schedule_blink(void) {
     if (s_idle_tmr) { app_timer_cancel(s_idle_tmr); s_idle_tmr = NULL; }
+    if (s_sleeping) return;  // frozen: no idle redraws at all
     s_idle_tmr = app_timer_register(rng(BLINK_MIN_MS, BLINK_MAX_MS), blink_start_cb, NULL);
 }
 
@@ -885,11 +1202,104 @@ static void update_time(void) {
         memmove(s_tbuf, s_tbuf + 1, strlen(s_tbuf));
     }
 
+    if (s_settings.show_seconds && !s_sleeping) {
+        strftime(s_sbuf, sizeof(s_sbuf), ":%S", tm);
+    } else {
+        s_sbuf[0] = '\0';
+    }
+
     if (s_settings.show_date) {
-        strftime(s_date_buf, sizeof(s_date_buf), "%a %b %d", tm);
+        static const char *const fmts[] = { "%a %b %d", "%m/%d", "%d/%m" };
+        int df = s_settings.date_format < ARRAY_LENGTH(fmts) ? s_settings.date_format : 0;
+        strftime(s_date_buf, sizeof(s_date_buf), fmts[df], tm);
     } else {
         s_date_buf[0] = '\0';
     }
+}
+
+// ================================================================
+// INFO SOURCES (health, battery, weather, sleep)
+// ================================================================
+static bool slot_used(int slot) {
+    return s_settings.slot_left == slot || s_settings.slot_right == slot;
+}
+
+static void update_health(void) {
+#if defined(PBL_HEALTH)
+    time_t now = time(NULL);
+    time_t start = time_start_of_today();
+    if (health_service_metric_accessible(HealthMetricStepCount, start, now)
+            & HealthServiceAccessibilityMaskAvailable) {
+        s_steps = health_service_sum_today(HealthMetricStepCount);
+    }
+    if (health_service_metric_accessible(HealthMetricHeartRateBPM, now, now)
+            & HealthServiceAccessibilityMaskAvailable) {
+        s_heart = health_service_peek_current_value(HealthMetricHeartRateBPM);
+    }
+#endif
+}
+
+static bool is_asleep(void) {
+#if defined(PBL_HEALTH)
+    HealthActivityMask act = health_service_peek_current_activities();
+    if (act & (HealthActivitySleep | HealthActivityRestfulSleep)) return true;
+#endif
+    return quiet_time_is_active();
+}
+
+static void request_weather(void) {
+    if (!slot_used(SLOT_WEATHER)) return;
+    DictionaryIterator *it;
+    if (app_message_outbox_begin(&it) != APP_MSG_OK) return;
+    dict_write_uint8(it, MESSAGE_KEY_WeatherRequest, 1);
+    app_message_outbox_send();
+}
+
+static void battery_handler(BatteryChargeState st) {
+    s_battery = st.charge_percent;
+    if (slot_used(SLOT_BATTERY)) layer_mark_dirty(s_cvs);
+}
+
+static void bt_handler(bool connected) {
+    if (!connected && s_settings.bt_vibrate && !quiet_time_is_active()) {
+        vibes_double_pulse();
+    }
+}
+
+#if defined(PBL_HEALTH)
+static void health_handler(HealthEventType event, void *context) {
+    if (event == HealthEventSleepUpdate) return;  // re-checked each minute
+    update_health();
+    if (slot_used(SLOT_STEPS) || slot_used(SLOT_HEART)) layer_mark_dirty(s_cvs);
+}
+#endif
+
+static void tick_handler(struct tm *tick_time, TimeUnits changed);
+
+// Seconds need SECOND_UNIT ticks; otherwise stay on MINUTE_UNIT for battery
+static void update_tick_subscription(void) {
+    TimeUnits want = (s_settings.show_seconds && !s_sleeping) ? SECOND_UNIT : MINUTE_UNIT;
+    if (want != s_tick_unit) {
+        s_tick_unit = want;
+        tick_timer_service_subscribe(want, tick_handler);
+    }
+}
+
+// Enter/leave sleepy mode (Quiet Time or sleep detected, if enabled)
+static void update_sleeping(void) {
+    bool sleeping = s_settings.sleepy && is_asleep();
+    if (sleeping == s_sleeping) return;
+    s_sleeping = sleeping;
+    if (sleeping) {
+        // Freeze in the resting pose: eyes open, door closed, time visible
+        if (s_idle_tmr) { app_timer_cancel(s_idle_tmr); s_idle_tmr = NULL; }
+        s_blink_fr = 0;
+    } else if (s_st == ST_IDLE) {
+        schedule_blink();
+    }
+    update_tick_subscription();
+    update_time();
+    layer_mark_dirty(s_cvs);
 }
 
 static void start_minute_anim(void) {
@@ -912,6 +1322,19 @@ static void start_minute_anim(void) {
 
 static void tick_handler(struct tm *tick_time, TimeUnits changed) {
     update_time();
+    if (!(changed & MINUTE_UNIT)) {
+        // Seconds-only tick: just repaint the time
+        if (s_st == ST_IDLE) layer_mark_dirty(s_cvs);
+        return;
+    }
+
+    update_sleeping();
+    if (tick_time->tm_min % WEATHER_EVERY_MIN == 0) request_weather();
+    if (s_sleeping) {
+        layer_mark_dirty(s_cvs);
+        return;
+    }
+
     // Advance wash cycle and arm position per minute
     s_wash_ph = (s_wash_ph + TRIG_MAX_ANGLE / 8) % TRIG_MAX_ANGLE;
     s_arm_ph = (s_arm_ph + TRIG_MAX_ANGLE / 8) % TRIG_MAX_ANGLE;
@@ -924,21 +1347,56 @@ static void tick_handler(struct tm *tick_time, TimeUnits changed) {
 // ================================================================
 // APPMESSAGE (Clay settings)
 // ================================================================
-static void inbox_received_callback(DictionaryIterator *iterator, void *context) {
-    Tuple *tf_tuple = dict_find(iterator, MESSAGE_KEY_TimeFormat);
-    Tuple *sd_tuple = dict_find(iterator, MESSAGE_KEY_ShowDate);
+// Clay sends select values as strings ("0", "1"); toggles/colors as ints
+static int tuple_int(Tuple *t) {
+    return (t->type == TUPLE_CSTRING) ? atoi(t->value->cstring) : (int)t->value->int32;
+}
 
-    if (tf_tuple) {
-        // Clay sends select values as strings ("0", "1", "2")
-        s_settings.time_format = (tf_tuple->type == TUPLE_CSTRING)
-            ? atoi(tf_tuple->value->cstring)
-            : (int)tf_tuple->value->int32;
+static void inbox_received_callback(DictionaryIterator *iterator, void *context) {
+    // Weather update from pkjs
+    Tuple *wt = dict_find(iterator, MESSAGE_KEY_WeatherTemp);
+    Tuple *wc = dict_find(iterator, MESSAGE_KEY_WeatherCode);
+    if (wt && wc) {
+        s_weather.temp = (int16_t)tuple_int(wt);
+        s_weather.code = (uint8_t)tuple_int(wc);
+        s_weather.updated = (int32_t)time(NULL);
+        persist_write_data(WEATHER_KEY, &s_weather, sizeof(s_weather));
+        layer_mark_dirty(s_cvs);
+        return;
     }
-    if (sd_tuple) {
-        s_settings.show_date = (sd_tuple->value->int32 == 1);
+
+    // Settings from Clay
+    Tuple *t;
+    bool any = false;
+#define READ(key, field) \
+    if ((t = dict_find(iterator, MESSAGE_KEY_##key))) { s_settings.field = tuple_int(t); any = true; }
+    READ(TimeFormat, time_format)
+    READ(ShowDate, show_date)
+    READ(DateFormat, date_format)
+    READ(ShowSeconds, show_seconds)
+    READ(SlotLeft, slot_left)
+    READ(SlotRight, slot_right)
+    READ(TempUnits, temp_units)
+    READ(BtVibrate, bt_vibrate)
+    READ(SleepyMode, sleepy)
+    READ(Theme, theme)
+#undef READ
+    // Clay color pickers send 0xRRGGBB; convert to the watch's 8-bit color
+    if ((t = dict_find(iterator, MESSAGE_KEY_WallColor))) {
+        s_settings.wall_argb = GColorFromHEX(t->value->int32).argb;
+        any = true;
     }
+    if ((t = dict_find(iterator, MESSAGE_KEY_FloorColor))) {
+        s_settings.floor_argb = GColorFromHEX(t->value->int32).argb;
+        any = true;
+    }
+    if (!any) return;
 
     save_settings();
+    apply_theme();
+    update_health();
+    update_sleeping();
+    update_tick_subscription();
     update_time();
     layer_mark_dirty(s_cvs);
 }
@@ -1010,6 +1468,10 @@ static void init(void) {
 
     // Load saved settings before creating UI
     load_settings();
+    apply_theme();
+    s_battery = battery_state_service_peek().charge_percent;
+    update_health();
+    s_sleeping = s_settings.sleepy && is_asleep();
 
     s_win = window_create();
     window_set_background_color(s_win, GColorBlack);
@@ -1019,7 +1481,14 @@ static void init(void) {
     });
     window_stack_push(s_win, true);
 
-    tick_timer_service_subscribe(MINUTE_UNIT, tick_handler);
+    update_tick_subscription();
+    battery_state_service_subscribe(battery_handler);
+    connection_service_subscribe((ConnectionHandlers) {
+        .pebble_app_connection_handler = bt_handler,
+    });
+#if defined(PBL_HEALTH)
+    health_service_events_subscribe(health_handler, NULL);
+#endif
 
     // Register AppMessage for Clay settings
     app_message_register_inbox_received(inbox_received_callback);
@@ -1029,6 +1498,11 @@ static void init(void) {
 
 static void deinit(void) {
     tick_timer_service_unsubscribe();
+    battery_state_service_unsubscribe();
+    connection_service_unsubscribe();
+#if defined(PBL_HEALTH)
+    health_service_events_unsubscribe();
+#endif
     if (s_win) { window_destroy(s_win); s_win = NULL; }
 }
 
