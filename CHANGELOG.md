@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+### New
+- More info corners: phone battery, when your next calendar event starts, and two of your favorite readings from the Pebble app (Settings, Plugins, Complications).
+- Weather now comes from the weather provider you picked in the Pebble app, in your chosen units. Open-Meteo is still used when no weather provider answers.
+
+### Better
+- Asks only for what it uses: location for weather, health for steps and heart rate, and calendar for your next event. Each one is optional.
+
+The new corners need Pebble app 2.0 or later.
+
 ## 1.2.0 - 2026-10-25
 
 ### New

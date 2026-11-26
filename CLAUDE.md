@@ -19,7 +19,8 @@ washTimeWatchFace/
       washTimeWatchFace.c   # Watchface implementation (drawing, state machine, services)
       logic.c / logic.h     # Pure logic with no Pebble deps (unit tested on desktop)
     pkjs/
-      index.js              # PebbleKit JS entry — Clay settings + Open-Meteo weather fetch
+      index.js              # PebbleKit JS entry — Clay settings, plugin subscriptions, Open-Meteo fallback
+      plugins.js            # Pure helpers for Pebble plugin data (unit tested)
       config.js             # Clay config page definition
       custom-clay.js        # Show/hide config items (custom colors, date style)
       weather.js            # Pure weather helpers (unit tested)
@@ -65,12 +66,12 @@ Single-file architecture with these sections:
 | Globals | Window, Layer, timers, animation state, eye/arm/wash phases, puddle size, time buffers |
 | Layout | `compute_layout()` — derives all positions from `layer_get_bounds()` using ratios |
 | Settings | `load_settings()` / `save_settings()` (versioned struct, migrates 1.x), `apply_theme()` |
-| Info slots | `draw_slots()` — weather / steps / heart rate / battery in the top wall corners |
+| Info slots | `draw_slots()` — weather / steps / heart rate / battery / phone battery / next event / favorites in the top wall corners |
 | Drawing | 10 draw functions called back-to-front in `canvas_update()` |
 | Info sources | `update_health()`, battery/BT handlers, `request_weather()`, `update_sleeping()` |
 | Timers | Blink timer (every 5-9s, no continuous idle timer), Anim timer (50ms/20FPS) for overflow |
 | State Machine | `advance_state()` — ST_IDLE → ST_OPEN → ST_OVER → ST_POOL → ST_RECEDE → ST_SETTLE → ST_IDLE |
-| AppMessage | `inbox_received_callback()` — Clay settings and weather (`WeatherTemp`, `WeatherCode`) |
+| AppMessage | `inbox_received_callback()` — Clay settings, weather (`WeatherTemp`, `WeatherCode`) and plugin readings (`PhoneBattery`, `EventStart`, `FavText1`, `FavText2`) |
 
 ### Draw Order (painter's algorithm)
 
@@ -104,7 +105,13 @@ Sections: Time & Date (`TimeFormat`, `ShowSeconds`, `ShowDate`, `DateFormat`), E
 
 Clay sends **select/radio values as strings** — read them with `tuple_int()`, never `->int32` directly. Color pickers send 0xRRGGBB ints (convert with `GColorFromHEX`).
 
-Settings persist under `SETTINGS_KEY=2` with a `version` field; bump `SETTINGS_VERSION` when changing the struct. Key 1 holds 1.x settings and is migrated on load. Weather persists under `WEATHER_KEY=3`. After adding messageKeys, run `pebble clean` before building.
+Settings persist under `SETTINGS_KEY=2` with a `version` field; bump `SETTINGS_VERSION` when changing the struct. Key 1 holds 1.x settings and is migrated on load. Weather persists under `WEATHER_KEY=3`, plugin readings (`PluginData`) under `PLUGIN_KEY=4`. After adding messageKeys, run `pebble clean` before building.
+
+## Plugins and permissions
+
+The face is manifest version 2 (the SDK default since 4.44): PebbleKit JS can only use what `usesPermissions` in package.json declares. Declare any new domain, Location, Health, Calendar etc. there with a short `reason` and `required`.
+
+Slots 5-8 read Pebble plugins from PKJS (`Pebble.subscribeToSource`): `phone/phone_state`, `calendar/event`, `preferences/complications`. Weather subscribes to `weather/location` and falls back to Open-Meteo when no plugin answers or on Pebble app < 2.0. The watch's `WeatherRequest` (every 30 min) means "refresh everything". Guide: https://developer.repebble.com/guides/plugins/preview/
 
 ## Key Constraints
 

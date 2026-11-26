@@ -17,6 +17,10 @@ extern uint32_t MESSAGE_KEY_FloorColor;
 extern uint32_t MESSAGE_KEY_WeatherTemp;
 extern uint32_t MESSAGE_KEY_WeatherCode;
 extern uint32_t MESSAGE_KEY_WeatherRequest;
+extern uint32_t MESSAGE_KEY_PhoneBattery;
+extern uint32_t MESSAGE_KEY_EventStart;
+extern uint32_t MESSAGE_KEY_FavText1;
+extern uint32_t MESSAGE_KEY_FavText2;
 
 // ================================================================
 // CONSTANTS
@@ -53,6 +57,7 @@ extern uint32_t MESSAGE_KEY_WeatherRequest;
 #define SETTINGS_KEY_V1 1   // original {time_format, show_date} struct
 #define SETTINGS_KEY    2   // current Settings struct (versioned)
 #define WEATHER_KEY     3
+#define PLUGIN_KEY      4   // PluginData from phone-side plugins
 
 #define WEATHER_EVERY_MIN 30
 
@@ -97,6 +102,7 @@ static struct {
 
 // Info slot data
 static Weather s_weather;
+static PluginData s_plugin = { .phone_battery = -1 };
 static int32_t s_steps = -1;     // -1 = unavailable
 static int32_t s_heart = 0;      // 0 = no reading
 static uint8_t s_battery = 100;
@@ -259,6 +265,11 @@ static void load_settings(void) {
     }
     if (persist_exists(WEATHER_KEY)) {
         persist_read_data(WEATHER_KEY, &s_weather, sizeof(s_weather));
+    }
+    if (persist_exists(PLUGIN_KEY) && persist_get_size(PLUGIN_KEY) == (int)sizeof(s_plugin)) {
+        persist_read_data(PLUGIN_KEY, &s_plugin, sizeof(s_plugin));
+        s_plugin.fav[0][PLUGIN_TEXT_LEN - 1] = '\0';
+        s_plugin.fav[1][PLUGIN_TEXT_LEN - 1] = '\0';
     }
 }
 
@@ -545,6 +556,71 @@ static void draw_icon_battery(GContext *ctx, int x, int y) {
     graphics_fill_rect(ctx, GRect(x + 1, y + 4, fill, 5), 0, GCornerNone);
 }
 
+static void draw_icon_phone(GContext *ctx, int x, int y) {
+    // Phone outline with a charge bar showing the phone's battery
+    GColor fg = CLR_SLOT_TEXT;
+    graphics_context_set_stroke_color(ctx, fg);
+    graphics_context_set_stroke_width(ctx, 1);
+    graphics_draw_round_rect(ctx, GRect(x + 3, y, 7, 12), 1);
+    int pct = s_plugin.phone_battery < 0 ? 0 : s_plugin.phone_battery;
+    int fill = 8 * pct / 100;
+    if (fill < 1) fill = 1;
+    graphics_context_set_fill_color(ctx, fg);
+#if defined(PBL_COLOR)
+    if (s_plugin.phone_battery >= 0 && s_plugin.phone_battery <= 20) {
+        graphics_context_set_fill_color(ctx, GColorRed);
+    }
+#endif
+    graphics_fill_rect(ctx, GRect(x + 5, y + 10 - fill, 3, fill), 0, GCornerNone);
+}
+
+static void draw_icon_calendar(GContext *ctx, int x, int y) {
+    GColor fg = CLR_SLOT_TEXT;
+    graphics_context_set_stroke_color(ctx, fg);
+    graphics_context_set_fill_color(ctx, fg);
+    graphics_context_set_stroke_width(ctx, 1);
+    graphics_draw_rect(ctx, GRect(x, y + 2, 12, 10));
+    graphics_fill_rect(ctx, GRect(x, y + 2, 12, 3), 0, GCornerNone);
+    graphics_draw_line(ctx, GPoint(x + 3, y), GPoint(x + 3, y + 2));
+    graphics_draw_line(ctx, GPoint(x + 8, y), GPoint(x + 8, y + 2));
+    for (int r = 0; r < 2; r++) {
+        for (int c = 0; c < 3; c++) {
+            graphics_draw_pixel(ctx, GPoint(x + 3 + c * 3, y + 7 + r * 2));
+        }
+    }
+}
+
+static void draw_icon_star(GContext *ctx, int x, int y) {
+    // Small star for "My favorite readings" from the Pebble app
+    graphics_context_set_fill_color(ctx, PBL_IF_COLOR_ELSE(GColorChromeYellow, CLR_SLOT_TEXT));
+    graphics_context_set_stroke_color(ctx, CLR_SLOT_TEXT);
+    graphics_context_set_stroke_width(ctx, 1);
+    GPoint pts[10];
+    for (int i = 0; i < 10; i++) {
+        int32_t a = i * TRIG_MAX_ANGLE / 10;
+        int r = (i % 2) ? 3 : 6;
+        pts[i] = GPoint(x + 6 + sin_lookup(a) * r / TRIG_MAX_RATIO,
+                        y + 6 - cos_lookup(a) * r / TRIG_MAX_RATIO);
+    }
+    GPathInfo info = { .num_points = 10, .points = pts };
+    GPath *path = gpath_create(&info);
+    if (!path) return;
+    gpath_draw_filled(ctx, path);
+    gpath_draw_outline(ctx, path);
+    gpath_destroy(path);
+}
+
+static void event_text(char *buf, size_t len) {
+    time_t start = (time_t)s_plugin.event_start;
+    time_t now = time(NULL);
+    struct tm *t = localtime(&start);
+    bool use24h = s_settings.time_format == 2 ||
+                  (s_settings.time_format == 0 && clock_is_24h_style());
+    wl_event_text(s_plugin.event_start, (int32_t)now,
+                  t ? t->tm_hour : 0, t ? t->tm_min : 0, t ? t->tm_wday : 0,
+                  use24h, buf, len);
+}
+
 // Format a slot's value; returns false if there is nothing to show
 static bool slot_text(int slot, char *buf, size_t len) {
     switch (slot) {
@@ -562,6 +638,16 @@ static bool slot_text(int slot, char *buf, size_t len) {
 #endif
         case SLOT_BATTERY:
             snprintf(buf, len, "%d%%", s_battery);
+            return true;
+        case SLOT_PHONE_BATTERY:
+            wl_phone_battery_text(&s_plugin, (int32_t)time(NULL), buf, len);
+            return true;
+        case SLOT_NEXT_EVENT:
+            event_text(buf, len);
+            return true;
+        case SLOT_FAV_1:
+        case SLOT_FAV_2:
+            wl_fav_text(&s_plugin, slot - SLOT_FAV_1, (int32_t)time(NULL), buf, len);
             return true;
         default:
             return false;
@@ -587,6 +673,10 @@ static void draw_slot(GContext *ctx, int slot, GRect box, bool right) {
         case SLOT_STEPS:   draw_icon_steps(ctx, x, icon_y); break;
         case SLOT_HEART:   draw_icon_heart(ctx, x, icon_y); break;
         case SLOT_BATTERY: draw_icon_battery(ctx, x, icon_y); break;
+        case SLOT_PHONE_BATTERY: draw_icon_phone(ctx, x, icon_y); break;
+        case SLOT_NEXT_EVENT: draw_icon_calendar(ctx, x, icon_y); break;
+        case SLOT_FAV_1:
+        case SLOT_FAV_2: draw_icon_star(ctx, x, icon_y); break;
     }
 
     graphics_context_set_text_color(ctx, CLR_SLOT_TEXT);
@@ -1179,8 +1269,15 @@ static bool is_asleep(void) {
     return quiet_time_is_active();
 }
 
+// Any slot the phone fills (weather, or readings from plugins)
+static bool phone_slot_used(void) {
+    return slot_used(SLOT_WEATHER) || s_settings.slot_left >= SLOT_PHONE_BATTERY ||
+           s_settings.slot_right >= SLOT_PHONE_BATTERY;
+}
+
+// Ask the phone to refresh everything the slots show
 static void request_weather(void) {
-    if (!slot_used(SLOT_WEATHER)) return;
+    if (!phone_slot_used()) return;
     DictionaryIterator *it;
     if (app_message_outbox_begin(&it) != APP_MSG_OK) return;
     dict_write_uint8(it, MESSAGE_KEY_WeatherRequest, 1);
@@ -1285,6 +1382,7 @@ static int tuple_int(Tuple *t) {
 }
 
 static void inbox_received_callback(DictionaryIterator *iterator, void *context) {
+    Tuple *t;
     // Weather update from pkjs
     Tuple *wt = dict_find(iterator, MESSAGE_KEY_WeatherTemp);
     Tuple *wc = dict_find(iterator, MESSAGE_KEY_WeatherCode);
@@ -1297,8 +1395,34 @@ static void inbox_received_callback(DictionaryIterator *iterator, void *context)
         return;
     }
 
+    // Readings from phone-side plugins
+    bool plugin = false;
+    if ((t = dict_find(iterator, MESSAGE_KEY_PhoneBattery))) {
+        s_plugin.phone_battery = (int8_t)tuple_int(t);
+        plugin = true;
+    }
+    if ((t = dict_find(iterator, MESSAGE_KEY_EventStart))) {
+        s_plugin.event_start = (int32_t)tuple_int(t);
+        plugin = true;
+    }
+    if ((t = dict_find(iterator, MESSAGE_KEY_FavText1)) && t->type == TUPLE_CSTRING) {
+        strncpy(s_plugin.fav[0], t->value->cstring, PLUGIN_TEXT_LEN - 1);
+        s_plugin.fav[0][PLUGIN_TEXT_LEN - 1] = '\0';
+        plugin = true;
+    }
+    if ((t = dict_find(iterator, MESSAGE_KEY_FavText2)) && t->type == TUPLE_CSTRING) {
+        strncpy(s_plugin.fav[1], t->value->cstring, PLUGIN_TEXT_LEN - 1);
+        s_plugin.fav[1][PLUGIN_TEXT_LEN - 1] = '\0';
+        plugin = true;
+    }
+    if (plugin) {
+        s_plugin.updated = (int32_t)time(NULL);
+        persist_write_data(PLUGIN_KEY, &s_plugin, sizeof(s_plugin));
+        layer_mark_dirty(s_cvs);
+        return;
+    }
+
     // Settings from Clay
-    Tuple *t;
     bool any = false;
 #define READ(key, field) \
     if ((t = dict_find(iterator, MESSAGE_KEY_##key))) { s_settings.field = tuple_int(t); any = true; }
