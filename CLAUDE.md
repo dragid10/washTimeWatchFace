@@ -111,7 +111,7 @@ Settings persist under `SETTINGS_KEY=2` with a `version` field; bump `SETTINGS_V
 
 The face is manifest version 2 (the SDK default since 4.44): PebbleKit JS can only use what `usesPermissions` in package.json declares. Declare any new domain, Location, Health, Calendar etc. there with a short `reason` and `required`.
 
-Slots 5-8 read Pebble plugins from PKJS (`Pebble.subscribeToSource`): `phone/phone_state`, `calendar/event`, `preferences/complications`. Weather subscribes to `weather/location` and falls back to Open-Meteo when no plugin answers or on Pebble app < 2.0. The watch's `WeatherRequest` (every 30 min) means "refresh everything". Guide: https://developer.repebble.com/guides/plugins/preview/
+Slots 5-8 read Pebble plugins from PKJS (`Pebble.subscribeToSource`): `phone/phone_state`, `calendar/event`, `preferences/complications`. Weather subscribes to `weather/location` and falls back to Open-Meteo when no plugin answers or on Pebble app < 2.0. The watch's `WeatherRequest` (every 30 min) means "refresh everything". When a source needs the user, PKJS sends `PluginStatus` (2 bits per `PS_*` source: `PSTATE_ALLOW` / `UPDATE` / `PICK`) and the corner shows "Allow" / "Update" / "Pick" (`wl_plugin_note()`); the settings page adds a "Needs your attention" note (`settingsNotes()` in plugins.js). Guide: https://developer.repebble.com/guides/plugins/preview/
 
 ## Key Constraints
 

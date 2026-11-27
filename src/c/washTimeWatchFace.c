@@ -21,6 +21,7 @@ extern uint32_t MESSAGE_KEY_PhoneBattery;
 extern uint32_t MESSAGE_KEY_EventStart;
 extern uint32_t MESSAGE_KEY_FavText1;
 extern uint32_t MESSAGE_KEY_FavText2;
+extern uint32_t MESSAGE_KEY_PluginStatus;
 
 // ================================================================
 // CONSTANTS
@@ -621,8 +622,27 @@ static void event_text(char *buf, size_t len) {
                   use24h, buf, len);
 }
 
+// Plugin source behind a slot, or -1
+static int slot_source(int slot) {
+    switch (slot) {
+        case SLOT_WEATHER:       return PS_WEATHER;
+        case SLOT_PHONE_BATTERY: return PS_PHONE;
+        case SLOT_NEXT_EVENT:    return PS_EVENT;
+        case SLOT_FAV_1:         return PS_FAV_1;
+        case SLOT_FAV_2:         return PS_FAV_2;
+        default:                 return -1;
+    }
+}
+
 // Format a slot's value; returns false if there is nothing to show
 static bool slot_text(int slot, char *buf, size_t len) {
+    const char *note = wl_plugin_note(s_plugin.status, slot_source(slot));
+    // Weather keeps showing a fresh reading (e.g. from Open-Meteo) over a note
+    if (note && !(slot == SLOT_WEATHER && s_weather.updated &&
+                  time(NULL) - s_weather.updated <= WEATHER_STALE_S)) {
+        snprintf(buf, len, "%s", note);
+        return true;
+    }
     switch (slot) {
         case SLOT_WEATHER:
             wl_weather_text(&s_weather, (int32_t)time(NULL), buf, len);
@@ -1395,7 +1415,13 @@ static void inbox_received_callback(DictionaryIterator *iterator, void *context)
         return;
     }
 
-    // Readings from phone-side plugins
+    // Readings from phone-side plugins. A status alone (e.g. "Allow") doesn't
+    // make the last readings any fresher.
+    bool status = false;
+    if ((t = dict_find(iterator, MESSAGE_KEY_PluginStatus))) {
+        s_plugin.status = (uint16_t)tuple_int(t);
+        status = true;
+    }
     bool plugin = false;
     if ((t = dict_find(iterator, MESSAGE_KEY_PhoneBattery))) {
         s_plugin.phone_battery = (int8_t)tuple_int(t);
@@ -1415,8 +1441,8 @@ static void inbox_received_callback(DictionaryIterator *iterator, void *context)
         s_plugin.fav[1][PLUGIN_TEXT_LEN - 1] = '\0';
         plugin = true;
     }
-    if (plugin) {
-        s_plugin.updated = (int32_t)time(NULL);
+    if (plugin || status) {
+        if (plugin) s_plugin.updated = (int32_t)time(NULL);
         persist_write_data(PLUGIN_KEY, &s_plugin, sizeof(s_plugin));
         layer_mark_dirty(s_cvs);
         return;

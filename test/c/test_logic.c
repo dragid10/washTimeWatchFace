@@ -127,6 +127,17 @@ static void test_plugin_text(void) {
     CHECK_STR(b, "--");
     wl_event_text(now + 2 * 24 * 3600, now, 8, 0, 2, true, b, sizeof(b));
     CHECK_STR(b, "Tue");
+
+    // Notes for sources that need the user
+    uint16_t st = (PSTATE_ALLOW << (PS_EVENT * 2)) | (PSTATE_UPDATE << (PS_PHONE * 2)) |
+                  (PSTATE_PICK << (PS_FAV_2 * 2)) | (PSTATE_ALLOW << (PS_WEATHER * 2));
+    CHECK_STR(wl_plugin_note(st, PS_PHONE), "Update");
+    CHECK_STR(wl_plugin_note(st, PS_EVENT), "Allow");
+    CHECK(wl_plugin_note(st, PS_FAV_1) == NULL);
+    CHECK_STR(wl_plugin_note(st, PS_FAV_2), "Pick");
+    CHECK_STR(wl_plugin_note(st, PS_WEATHER), "Allow");
+    CHECK(wl_plugin_note(st, 7) == NULL);
+    CHECK(wl_plugin_note(0, PS_PHONE) == NULL);
 }
 
 static void test_time_text(void) {

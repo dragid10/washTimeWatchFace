@@ -78,7 +78,8 @@
       "PhoneBattery",
       "EventStart",
       "FavText1",
-      "FavText2"
+      "FavText2",
+      "PluginStatus"
     ],
     "resources": {
       "media": []

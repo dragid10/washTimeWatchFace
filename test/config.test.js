@@ -23,7 +23,7 @@ test('message keys are unique and each one is used', () => {
   assert.strictEqual(new Set(declared).size, declared.length);
   // Weather and plugin keys belong to pkjs <-> watch messages, not the page
   const internal = ['WeatherTemp', 'WeatherCode', 'WeatherRequest',
-                    'PhoneBattery', 'EventStart', 'FavText1', 'FavText2'];
+                    'PhoneBattery', 'EventStart', 'FavText1', 'FavText2', 'PluginStatus'];
   for (const k of declared) {
     if (internal.includes(k)) continue;
     assert.ok(inputs.some((i) => i.messageKey === k), `${k} declared but not on the page`);

@@ -45,11 +45,18 @@ typedef struct {
 
 // Readings from phone-side plugins (persisted). Text is the plugin's shortText.
 #define PLUGIN_TEXT_LEN 12
+
+// Why a plugin reading can't be shown, packed 2 bits per source in
+// PluginData.status (and the PluginStatus message from the phone)
+enum { PS_PHONE, PS_EVENT, PS_FAV_1, PS_FAV_2, PS_WEATHER };
+enum { PSTATE_OK, PSTATE_ALLOW, PSTATE_UPDATE, PSTATE_PICK };
+
 typedef struct {
     int8_t  phone_battery;            // 0-100, -1 = unknown
     int32_t event_start;              // epoch seconds of the next event, 0 = none
     char    fav[2][PLUGIN_TEXT_LEN];  // "My favorite readings" 1 and 2, "" = none
     int32_t updated;                  // time() of last update, 0 = never
+    uint16_t status;                  // PSTATE_* per PS_* source, 2 bits each
 } PluginData;
 
 // Math
@@ -84,6 +91,11 @@ void wl_event_text(int32_t start, int32_t now, int hour, int minute, int wday,
                    bool use24h, char *buf, size_t len);
 // A favorite reading's text, "--" when empty or stale
 void wl_fav_text(const PluginData *p, int index, int32_t now, char *buf, size_t len);
+
+// What a slot shows instead of a reading when its source needs the user:
+// "Allow" (a permission is off), "Update" (Pebble app too old for plugins),
+// "Pick" (no favorite chosen in the Pebble app). NULL when the reading is fine.
+const char *wl_plugin_note(uint16_t status, int source);
 
 // Theme: true when text on this background (2-bit r,g,b 0..3) should be dark
 bool wl_dark_text_on(int r, int g, int b);

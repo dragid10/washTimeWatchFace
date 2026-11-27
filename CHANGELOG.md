@@ -8,6 +8,7 @@
 
 ### Better
 - Asks only for what it uses: location for weather, health for steps and heart rate, and calendar for your next event. Each one is optional.
+- When a corner can't show its reading, it says why: "Allow" when a permission is off, "Update" when the Pebble app is too old, and "Pick" when you haven't chosen favorite readings. The settings page explains what to do.
 
 The new corners need Pebble app 2.0 or later.
 

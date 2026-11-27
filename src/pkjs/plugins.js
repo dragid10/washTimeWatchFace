@@ -10,6 +10,67 @@ var WX_CLEAR = 0, WX_CLOUDY = 1, WX_RAIN = 2, WX_SNOW = 3, WX_STORM = 4, WX_FOG 
 // Longest text the watch keeps for a favorite reading (PLUGIN_TEXT_LEN - 1 bytes)
 var MAX_TEXT_BYTES = 11;
 
+// Plugin sources and their states (PS_* / PSTATE_* in src/c/logic.h)
+var PS_PHONE = 0, PS_EVENT = 1, PS_FAV_1 = 2, PS_FAV_2 = 3, PS_WEATHER = 4;
+var PSTATE_OK = 0, PSTATE_ALLOW = 1, PSTATE_UPDATE = 2, PSTATE_PICK = 3;
+
+// The plugin source behind each slot
+var SLOT_SOURCE = {};
+SLOT_SOURCE[SLOT_WEATHER] = PS_WEATHER;
+SLOT_SOURCE[SLOT_PHONE_BATTERY] = PS_PHONE;
+SLOT_SOURCE[SLOT_NEXT_EVENT] = PS_EVENT;
+SLOT_SOURCE[SLOT_FAV_1] = PS_FAV_1;
+SLOT_SOURCE[SLOT_FAV_2] = PS_FAV_2;
+
+// { source: state } -> the PluginStatus int the watch unpacks
+function packStatus(states) {
+  var packed = 0;
+  Object.keys(states).forEach(function(source) {
+    packed |= (states[source] & 3) << (Number(source) * 2);
+  });
+  return packed;
+}
+
+// A subscription error -> what the watch should say about it
+function stateForError(err) {
+  return err && err.code === 'PERMISSION_DENIED' ? PSTATE_ALLOW : PSTATE_OK;
+}
+
+// What each source needs from the user, in words for the settings page
+var NEEDS = {};
+NEEDS[PS_WEATHER] = 'Mr. Washy needs your location for weather. Allow Location for Mr. Washy in the Pebble app.';
+NEEDS[PS_PHONE] = 'Mr. Washy can\'t read your phone\'s battery yet. Allow it for Mr. Washy in the Pebble app.';
+NEEDS[PS_EVENT] = 'Mr. Washy can\'t see your calendar yet. Allow Calendar for Mr. Washy in the Pebble app.';
+NEEDS[PS_FAV_1] = 'One of your favorite readings needs a permission Mr. Washy doesn\'t have yet. Allow it for Mr. Washy in the Pebble app.';
+NEEDS[PS_FAV_2] = NEEDS[PS_FAV_1];
+
+// The notes the settings page shows above the corner choices, given the
+// slots in use, the current states, and whether this Pebble app has plugins
+function settingsNotes(used, states, available) {
+  var notes = [];
+  var pluginSlots = [SLOT_PHONE_BATTERY, SLOT_NEXT_EVENT, SLOT_FAV_1, SLOT_FAV_2]
+    .filter(function(slot) { return used[slot]; });
+  if (!available) {
+    if (pluginSlots.length) {
+      notes.push('Phone battery, next event and favorite readings need Pebble app 2.0 or later. ' +
+                 'Update the Pebble app to see them.');
+    }
+    return notes;
+  }
+  Object.keys(used).forEach(function(slot) {
+    var source = SLOT_SOURCE[slot];
+    if (source === undefined) return;
+    var note = states[source] === PSTATE_ALLOW ? NEEDS[source] : null;
+    if (note && notes.indexOf(note) === -1) notes.push(note);
+  });
+  if ((used[SLOT_FAV_1] && states[PS_FAV_1] === PSTATE_PICK) ||
+      (used[SLOT_FAV_2] && states[PS_FAV_2] === PSTATE_PICK)) {
+    notes.push('Pick your favorite readings in the Pebble app under Settings, Plugins, ' +
+               'Complications. Mr. Washy shows the first two.');
+  }
+  return notes;
+}
+
 function slotsUsed(settings) {
   var used = {};
   [settings.SlotLeft, settings.SlotRight].forEach(function(v) {
@@ -139,6 +200,14 @@ module.exports = {
   SLOT_NEXT_EVENT: SLOT_NEXT_EVENT,
   SLOT_FAV_1: SLOT_FAV_1,
   SLOT_FAV_2: SLOT_FAV_2,
+  PS_PHONE: PS_PHONE, PS_EVENT: PS_EVENT, PS_FAV_1: PS_FAV_1, PS_FAV_2: PS_FAV_2,
+  PS_WEATHER: PS_WEATHER,
+  PSTATE_OK: PSTATE_OK, PSTATE_ALLOW: PSTATE_ALLOW, PSTATE_UPDATE: PSTATE_UPDATE,
+  PSTATE_PICK: PSTATE_PICK,
+  SLOT_SOURCE: SLOT_SOURCE,
+  packStatus: packStatus,
+  stateForError: stateForError,
+  settingsNotes: settingsNotes,
   slotsUsed: slotsUsed,
   conditionToCategory: conditionToCategory,
   convertTemp: convertTemp,

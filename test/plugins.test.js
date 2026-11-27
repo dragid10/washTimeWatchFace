@@ -76,3 +76,34 @@ test('readingText prefers shortText and fits the watch buffer', () => {
   assert.strictEqual(p.fitText('°°°°°°°'), '°°°°°');
   assert.strictEqual(p.fitText('ab😀😀😀'), 'ab😀😀');
 });
+
+test('packStatus puts 2 bits per source in the order the watch reads them', () => {
+  assert.strictEqual(p.packStatus({}), 0);
+  assert.strictEqual(p.packStatus({ [p.PS_PHONE]: p.PSTATE_UPDATE }), 2);
+  assert.strictEqual(p.packStatus({ [p.PS_EVENT]: p.PSTATE_ALLOW }), 1 << 2);
+  assert.strictEqual(p.packStatus({ [p.PS_FAV_2]: p.PSTATE_PICK, [p.PS_WEATHER]: p.PSTATE_ALLOW }),
+    (3 << 6) | (1 << 8));
+});
+
+test('only a permission error asks the user to allow something', () => {
+  assert.strictEqual(p.stateForError({ code: 'PERMISSION_DENIED' }), p.PSTATE_ALLOW);
+  assert.strictEqual(p.stateForError({ code: 'TIMEOUT' }), p.PSTATE_OK);
+  assert.strictEqual(p.stateForError(null), p.PSTATE_OK);
+});
+
+test('settings notes name what each used corner needs, once', () => {
+  const used = { 6: true, 7: true, 8: true };
+  assert.deepStrictEqual(p.settingsNotes(used, {}, true), []);
+  const notes = p.settingsNotes(used, { [p.PS_EVENT]: p.PSTATE_ALLOW,
+    [p.PS_FAV_1]: p.PSTATE_PICK, [p.PS_FAV_2]: p.PSTATE_PICK }, true);
+  assert.strictEqual(notes.length, 2);
+  assert.match(notes[0], /Allow Calendar/);
+  assert.match(notes[1], /Settings, Plugins, Complications/);
+  // A corner not in use never adds a note
+  assert.deepStrictEqual(p.settingsNotes({ 1: true }, { [p.PS_EVENT]: p.PSTATE_ALLOW }, true), []);
+});
+
+test('an old Pebble app gets one note, only when a plugin corner is used', () => {
+  assert.match(p.settingsNotes({ 5: true }, {}, false)[0], /Pebble app 2\.0/);
+  assert.deepStrictEqual(p.settingsNotes({ 1: true, 4: true }, {}, false), []);
+});

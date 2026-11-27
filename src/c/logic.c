@@ -107,6 +107,16 @@ void wl_fav_text(const PluginData *p, int index, int32_t now, char *buf, size_t 
     snprintf(buf, len, "%s", p->fav[index]);
 }
 
+const char *wl_plugin_note(uint16_t status, int source) {
+    if (source < 0 || source > PS_WEATHER) return NULL;
+    switch ((status >> (source * 2)) & 3) {
+        case PSTATE_ALLOW:  return "Allow";
+        case PSTATE_UPDATE: return "Update";
+        case PSTATE_PICK:   return "Pick";
+        default:            return NULL;
+    }
+}
+
 bool wl_dark_text_on(int r, int g, int b) {
     return r + g + b >= 5;
 }
