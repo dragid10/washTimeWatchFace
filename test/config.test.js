@@ -21,8 +21,9 @@ test('every setting the page sends is declared in package.json', () => {
 
 test('message keys are unique and each one is used', () => {
   assert.strictEqual(new Set(declared).size, declared.length);
-  // Weather keys belong to the pkjs <-> watch weather messages, not the page
-  const internal = ['WeatherTemp', 'WeatherCode', 'WeatherRequest'];
+  // Weather and plugin keys belong to pkjs <-> watch messages, not the page
+  const internal = ['WeatherTemp', 'WeatherCode', 'WeatherRequest',
+                    'PhoneBattery', 'EventStart', 'FavText1', 'FavText2', 'PluginStatus'];
   for (const k of declared) {
     if (internal.includes(k)) continue;
     assert.ok(inputs.some((i) => i.messageKey === k), `${k} declared but not on the page`);
@@ -52,7 +53,7 @@ test('select defaults are one of the options', () => {
 });
 
 test('option values stay inside the ranges the watch accepts', () => {
-  const max = { TimeFormat: 2, DateFormat: 2, SlotLeft: 4, SlotRight: 4, TempUnits: 1, Theme: 5 };
+  const max = { TimeFormat: 2, DateFormat: 2, SlotLeft: 8, SlotRight: 8, TempUnits: 1, Theme: 5 };
   for (const [key, hi] of Object.entries(max)) {
     const input = inputs.find((i) => i.messageKey === key);
     for (const o of input.options) {
@@ -72,4 +73,18 @@ test('toggles default to booleans and colors to hex', () => {
 
 test('Sleepy mode defaults on (matches the watch default)', () => {
   assert.strictEqual(inputs.find((i) => i.messageKey === 'SleepyMode').defaultValue, true);
+});
+
+test('slot options match the watch (SLOT_* in src/c/logic.h)', () => {
+  const slot = inputs.find((i) => i.messageKey === 'SlotLeft');
+  assert.deepStrictEqual(slot.options.map((o) => o.value), ['0', '1', '2', '3', '4', '5', '6', '7', '8']);
+});
+
+test('every permission has a reason and says whether it is required', () => {
+  for (const p of pkg.pebble.usesPermissions) {
+    assert.ok(p.reason && p.reason.length < 80, `${p.name} needs a short reason`);
+    assert.strictEqual(typeof p.required, 'boolean', `${p.name} needs required`);
+  }
+  const names = pkg.pebble.usesPermissions.map((p) => p.name);
+  for (const n of ['Location', 'Internet', 'Health', 'Calendar']) assert.ok(names.includes(n), n);
 });

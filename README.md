@@ -9,7 +9,7 @@ An anthropomorphic washing machine watchface for Pebble smartwatches.
 - **Animated wash cycle** - Clothes (sock and shirt) tumble inside the door with rotating suds
 - **Overflow animation** - Each minute, the door opens and water overflows to reveal the updated time. A sock tumbles out with the water before sliding back under the machine
 - **Living character** - Eyes blink and look around, arms sway gently
-- **Info corners** - Optional weather, steps, heart rate or battery in the top corners
+- **Info corners** - Optional weather, steps, heart rate, battery, phone battery, next event or your favorite readings in the top corners
 - **Themes** - Five color presets or your own wall and floor colors
 - **Sleepy mode** - Animation stops during Quiet Time or while you sleep
 - **Battery efficient** - No continuous timer. Brief redraws only during blinks (every 5-9s) and the minute overflow animation; seconds are opt-in
@@ -44,11 +44,11 @@ pebble install --emulator emery  # emulator
 Open the Pebble app on your phone, go to the Mr. Washy settings:
 
 - **Time & Date** - Time format (watch default, 12-hour, 24-hour), seconds, date and date style
-- **Extras** - What to show in the top-left and top-right corners: weather, steps, heart rate or battery; °F or °C
+- **Extras** - What to show in the top-left and top-right corners: weather, steps, heart rate, battery, phone battery, next event, or favorite reading 1 or 2; °F or °C
 - **Theme** - Classic, Midnight, Mint, Lavender, Sunset, or custom wall/floor colors
 - **Watch** - Sleepy Mr. Washy (no animation during Quiet Time or sleep), buzz on phone disconnect
 
-Weather comes from [Open-Meteo](https://open-meteo.com/) (no API key) using your phone's location, refreshed every 30 minutes.
+Weather, phone battery, next event and favorite readings come from [Pebble plugins](https://developer.repebble.com/guides/plugins/preview/) (Pebble app 2.0 or later). Weather uses the provider you picked in the Pebble app; when no weather plugin answers, it falls back to [Open-Meteo](https://open-meteo.com/) (no API key) using your phone's location, refreshed every 30 minutes. Favorite readings are the first two you pick in the Pebble app under Settings, Plugins, Complications.
 
 Settings are powered by [Clay](https://github.com/pebble/clay) and persist across watch restarts.
 
@@ -63,7 +63,8 @@ washTimeWatchFace/
     c/
       washTimeWatchFace.c     # Complete watchface (single file)
     pkjs/
-      index.js                # Settings + weather fetch
+      index.js                # Settings, plugin subscriptions, Open-Meteo fallback
+      plugins.js              # Reading plugin data (weather, phone, calendar, favorites)
       config.js               # Settings page definition
       custom-clay.js          # Show/hide settings on the config page
       weather.js              # Open-Meteo URL + response mapping

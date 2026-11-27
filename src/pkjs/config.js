@@ -3,7 +3,11 @@ var SLOT_OPTIONS = [
   { "label": "Weather", "value": "1" },
   { "label": "Steps", "value": "2" },
   { "label": "Heart rate", "value": "3" },
-  { "label": "Battery", "value": "4" }
+  { "label": "Battery", "value": "4" },
+  { "label": "Phone battery", "value": "5" },
+  { "label": "Next event", "value": "6" },
+  { "label": "Favorite reading 1", "value": "7" },
+  { "label": "Favorite reading 2", "value": "8" }
 ];
 
 module.exports = [
@@ -62,7 +66,7 @@ module.exports = [
       { "type": "heading", "defaultValue": "Extras" },
       {
         "type": "text",
-        "defaultValue": "Show extra info in the top corners, above Mr. Washy's arms. Steps come from your Pebble's own tracking, so they can differ a little from Google Health. Heart rate shows the watch's latest reading, so it can be a few minutes old. How often the watch measures is set by the system and your Health settings in the Pebble app."
+        "defaultValue": "Show extra info in the top corners, above Mr. Washy's arms. Steps come from your Pebble's own tracking, so they can differ a little from Google Health. Heart rate shows the watch's latest reading, so it can be a few minutes old. How often the watch measures is set by the system and your Health settings in the Pebble app. Phone battery, next event and favorite readings come from plugins and need Pebble app 2.0 or later. Pick your favorite readings in the Pebble app under Settings, Plugins, Complications."
       },
       {
         "type": "select",

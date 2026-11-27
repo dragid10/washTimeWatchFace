@@ -39,8 +39,8 @@ void wl_settings_from_v1(Settings *s, int time_format, bool show_date) {
 void wl_settings_sanitize(Settings *s) {
     if (s->time_format > 2) s->time_format = 0;
     if (s->date_format > 2) s->date_format = 0;
-    if (s->slot_left > SLOT_BATTERY) s->slot_left = SLOT_NONE;
-    if (s->slot_right > SLOT_BATTERY) s->slot_right = SLOT_NONE;
+    if (s->slot_left > SLOT_LAST) s->slot_left = SLOT_NONE;
+    if (s->slot_right > SLOT_LAST) s->slot_right = SLOT_NONE;
     if (s->temp_units > 1) s->temp_units = 0;
     if (s->theme > THEME_CUSTOM) s->theme = 0;
 }
@@ -70,6 +70,51 @@ bool wl_steps_text(int32_t steps, char *buf, size_t len) {
 void wl_heart_text(int32_t bpm, char *buf, size_t len) {
     if (bpm > 0) snprintf(buf, len, "%d", (int)bpm);
     else snprintf(buf, len, "--");
+}
+
+static bool plugin_stale(const PluginData *p, int32_t now) {
+    return p->updated == 0 || now - p->updated > WEATHER_STALE_S;
+}
+
+void wl_phone_battery_text(const PluginData *p, int32_t now, char *buf, size_t len) {
+    if (p->phone_battery < 0 || p->phone_battery > 100 || plugin_stale(p, now)) {
+        snprintf(buf, len, "--%%");
+    } else {
+        snprintf(buf, len, "%d%%", (int)p->phone_battery);
+    }
+}
+
+void wl_event_text(int32_t start, int32_t now, int hour, int minute, int wday,
+                   bool use24h, char *buf, size_t len) {
+    static const char *const DAYS[] = { "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat" };
+    if (start <= 0 || now - start > 60 * 60) { snprintf(buf, len, "--"); return; }
+    if (start - now >= 24 * 60 * 60) {
+        snprintf(buf, len, "%s", DAYS[((wday % 7) + 7) % 7]);
+        return;
+    }
+    if (!use24h) {
+        hour %= 12;
+        if (hour == 0) hour = 12;
+    }
+    snprintf(buf, len, "%d:%02d", hour, minute);
+}
+
+void wl_fav_text(const PluginData *p, int index, int32_t now, char *buf, size_t len) {
+    if (index < 0 || index > 1 || p->fav[index][0] == '\0' || plugin_stale(p, now)) {
+        snprintf(buf, len, "--");
+        return;
+    }
+    snprintf(buf, len, "%s", p->fav[index]);
+}
+
+const char *wl_plugin_note(uint16_t status, int source) {
+    if (source < 0 || source > PS_WEATHER) return NULL;
+    switch ((status >> (source * 2)) & 3) {
+        case PSTATE_ALLOW:  return "Allow";
+        case PSTATE_UPDATE: return "Update";
+        case PSTATE_PICK:   return "Pick";
+        default:            return NULL;
+    }
 }
 
 bool wl_dark_text_on(int r, int g, int b) {

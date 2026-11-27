@@ -20,6 +20,33 @@
       "health",
       "location"
     ],
+    "usesPermissions": [
+      {
+        "name": "Location",
+        "reason": "To show the weather where you are",
+        "required": false
+      },
+      {
+        "name": "Internet",
+        "parameters": {
+          "domains": [
+            "api.open-meteo.com"
+          ]
+        },
+        "reason": "To get the weather when no weather plugin answers",
+        "required": false
+      },
+      {
+        "name": "Health",
+        "reason": "To show your steps and heart rate",
+        "required": false
+      },
+      {
+        "name": "Calendar",
+        "reason": "To show when your next event starts",
+        "required": false
+      }
+    ],
     "targetPlatforms": [
       "aplite",
       "basalt",
@@ -47,7 +74,12 @@
       "FloorColor",
       "WeatherTemp",
       "WeatherCode",
-      "WeatherRequest"
+      "WeatherRequest",
+      "PhoneBattery",
+      "EventStart",
+      "FavText1",
+      "FavText2",
+      "PluginStatus"
     ],
     "resources": {
       "media": []

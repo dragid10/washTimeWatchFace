@@ -63,7 +63,7 @@ static void test_settings(void) {
     CHECK(s.sleepy && s.slot_left == SLOT_NONE);
 
     // Garbage from storage or Clay is pulled back into range
-    s.time_format = 9; s.date_format = 9; s.slot_left = 77; s.slot_right = 5;
+    s.time_format = 9; s.date_format = 9; s.slot_left = 77; s.slot_right = SLOT_LAST + 1;
     s.temp_units = 3; s.theme = 200;
     wl_settings_sanitize(&s);
     CHECK(s.time_format == 0 && s.date_format == 0);
@@ -74,6 +74,70 @@ static void test_settings(void) {
     s.time_format = 1; s.slot_left = SLOT_BATTERY; s.theme = THEME_CUSTOM;
     wl_settings_sanitize(&s);
     CHECK(s.time_format == 1 && s.slot_left == SLOT_BATTERY && s.theme == THEME_CUSTOM);
+
+    // Plugin slots are valid choices
+    s.slot_left = SLOT_PHONE_BATTERY; s.slot_right = SLOT_FAV_2;
+    wl_settings_sanitize(&s);
+    CHECK(s.slot_left == SLOT_PHONE_BATTERY && s.slot_right == SLOT_FAV_2);
+}
+
+static void test_plugin_text(void) {
+    char b[PLUGIN_TEXT_LEN];
+    int32_t now = 1000000;
+    PluginData p = { .phone_battery = 87, .event_start = 0, .fav = { "72\xC2\xB0" "F", "" },
+                     .updated = now - 60 };
+
+    wl_phone_battery_text(&p, now, b, sizeof(b));
+    CHECK_STR(b, "87%");
+    p.phone_battery = -1;
+    wl_phone_battery_text(&p, now, b, sizeof(b));
+    CHECK_STR(b, "--%");
+    p.phone_battery = 50; p.updated = now - WEATHER_STALE_S - 1;   // stale
+    wl_phone_battery_text(&p, now, b, sizeof(b));
+    CHECK_STR(b, "--%");
+    p.updated = 0;                                                 // never
+    wl_phone_battery_text(&p, now, b, sizeof(b));
+    CHECK_STR(b, "--%");
+
+    p.updated = now - 60;
+    wl_fav_text(&p, 0, now, b, sizeof(b));
+    CHECK_STR(b, "72\xC2\xB0" "F");
+    wl_fav_text(&p, 1, now, b, sizeof(b));
+    CHECK_STR(b, "--");                                            // empty slot
+    wl_fav_text(&p, 2, now, b, sizeof(b));
+    CHECK_STR(b, "--");                                            // out of range
+    p.updated = now - WEATHER_STALE_S - 1;
+    wl_fav_text(&p, 0, now, b, sizeof(b));
+    CHECK_STR(b, "--");
+
+    // Next event: time within a day, weekday further out, "--" when none or long started
+    wl_event_text(0, now, 9, 30, 2, false, b, sizeof(b));
+    CHECK_STR(b, "--");
+    wl_event_text(now + 600, now, 9, 5, 2, false, b, sizeof(b));
+    CHECK_STR(b, "9:05");
+    wl_event_text(now + 600, now, 21, 30, 2, false, b, sizeof(b));
+    CHECK_STR(b, "9:30");
+    wl_event_text(now + 600, now, 0, 15, 2, false, b, sizeof(b));
+    CHECK_STR(b, "12:15");
+    wl_event_text(now + 600, now, 21, 30, 2, true, b, sizeof(b));
+    CHECK_STR(b, "21:30");
+    wl_event_text(now - 30 * 60, now, 8, 0, 2, true, b, sizeof(b)); // in progress
+    CHECK_STR(b, "8:00");
+    wl_event_text(now - 61 * 60, now, 8, 0, 2, true, b, sizeof(b)); // long started
+    CHECK_STR(b, "--");
+    wl_event_text(now + 2 * 24 * 3600, now, 8, 0, 2, true, b, sizeof(b));
+    CHECK_STR(b, "Tue");
+
+    // Notes for sources that need the user
+    uint16_t st = (PSTATE_ALLOW << (PS_EVENT * 2)) | (PSTATE_UPDATE << (PS_PHONE * 2)) |
+                  (PSTATE_PICK << (PS_FAV_2 * 2)) | (PSTATE_ALLOW << (PS_WEATHER * 2));
+    CHECK_STR(wl_plugin_note(st, PS_PHONE), "Update");
+    CHECK_STR(wl_plugin_note(st, PS_EVENT), "Allow");
+    CHECK(wl_plugin_note(st, PS_FAV_1) == NULL);
+    CHECK_STR(wl_plugin_note(st, PS_FAV_2), "Pick");
+    CHECK_STR(wl_plugin_note(st, PS_WEATHER), "Allow");
+    CHECK(wl_plugin_note(st, 7) == NULL);
+    CHECK(wl_plugin_note(0, PS_PHONE) == NULL);
 }
 
 static void test_time_text(void) {
@@ -132,6 +196,7 @@ int main(void) {
     test_quick_view_clamp();
     test_settings();
     test_time_text();
+    test_plugin_text();
     test_weather_text();
     test_steps_and_heart_text();
     test_theme_contrast();
